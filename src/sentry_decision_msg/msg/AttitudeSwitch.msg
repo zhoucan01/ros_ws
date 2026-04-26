@@ -1,0 +1,7 @@
+uint8 sentry_if_confirm_alive
+uint8 sentry_if_immediate_alive
+uint16 exchange_projectile_num
+uint8 remote_exchange_projectile_count
+uint8 remote_exchange_hp_count
+uint8 sentry_attitude_switch
+uint8 sentry_confirm_big_buff

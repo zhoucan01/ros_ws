@@ -1,0 +1,7 @@
+/**:
+  ros__parameters:
+    arrived_threshold: 0.3
+    close_threshold: 1.0
+    use_goal_pose_topic: true
+    use_action_goal: true
+    tunnel_monitor_topic: tunnel_monitor

@@ -1,0 +1,87 @@
+/**:
+  ros__parameters:
+    bt_xml: ""
+    tick_hz: 1.0
+    use_groot: true
+    groot_port: 1666
+    decision_point_count: 8
+    #初始点即init_point是建图起点，然后这里的坐标是相对于建图起点的坐标，单位是米。可以根据实际地图和路径进行调整。
+    points.0: [0.5, -0.8]
+    points.1: [2.0, 1.0]
+    points.2: [2.0, 1.0]
+    points.3: [2.0, 1.0]
+    points.4: [2.0, 1.0]
+    points.5: [2.0, 1.0]
+    points.6: [2.0, 1.0]
+    points.7: [2.0, 2.0]
+    anti_autoaim.attack_radius: 1.5
+    anti_autoaim.num_sectors: 36
+    anti_autoaim.cost_threshold: 10
+    anti_autoaim.robot_base_frame: "base_link"
+    anti_autoaim.transform_tolerance: 0.1
+    anti_autoaim.max_visualization_distance: 6.0
+    anti_autoaim.marker_scale_base: 0.2
+    anti_autoaim.visualize: true
+    anti_autoaim.enable_attack: true
+    anti_autoaim.limit_chase_range: false
+    anti_autoaim.max_chase_distance: 3.0
+    anti_autoaim.distance_weight: 0.6
+    anti_autoaim.cost_weight: 0.4
+    anti_autoaim.policy.0.enable: false
+    anti_autoaim.policy.0.limit: true
+
+    anti_autoaim.policy.1.enable: false
+    anti_autoaim.policy.1.limit: true
+
+    anti_autoaim.policy.2.enable: true
+    anti_autoaim.policy.2.limit: true
+
+    anti_autoaim.policy.3.enable: false
+    anti_autoaim.policy.3.limit: true
+
+    anti_autoaim.policy.4.enable: true
+    anti_autoaim.policy.4.limit: false
+
+    anti_autoaim.policy.5.enable: false
+    anti_autoaim.policy.5.limit: true
+
+    anti_autoaim.policy.6.enable: true
+    anti_autoaim.policy.6.limit: true
+
+    anti_autoaim.policy.7.enable: true
+    anti_autoaim.policy.7.limit: true
+    anti_autoaim.rect.0.x_min: 0.0
+    anti_autoaim.rect.0.x_max: 1.0
+    anti_autoaim.rect.0.y_min: -1.3
+    anti_autoaim.rect.0.y_max: -0.3
+    anti_autoaim.rect.1.x_min: 0.5
+    anti_autoaim.rect.1.x_max: 1.5
+    anti_autoaim.rect.1.y_min: 0.5
+    anti_autoaim.rect.1.y_max: 1.5
+    anti_autoaim.rect.2.x_min: 0.5
+    anti_autoaim.rect.2.x_max: 1.5
+    anti_autoaim.rect.2.y_min: 0.5
+    anti_autoaim.rect.2.y_max: 1.5
+    anti_autoaim.rect.3.x_min: 0.5
+    anti_autoaim.rect.3.x_max: 1.5
+    anti_autoaim.rect.3.y_min: 0.5
+    anti_autoaim.rect.3.y_max: 1.5
+    anti_autoaim.rect.4.x_min: 0.0
+    anti_autoaim.rect.4.x_max: 2.0
+    anti_autoaim.rect.4.y_min: 0.0
+    anti_autoaim.rect.4.y_max: 2.0
+    anti_autoaim.rect.5.x_min: 0.5
+    anti_autoaim.rect.5.x_max: 1.5
+    anti_autoaim.rect.5.y_min: 0.5
+    anti_autoaim.rect.5.y_max: 1.5
+    anti_autoaim.rect.6.x_min: 0.5
+    anti_autoaim.rect.6.x_max: 1.5
+    anti_autoaim.rect.6.y_min: 0.5
+    anti_autoaim.rect.6.y_max: 1.5
+    anti_autoaim.rect.7.x_min: 1.5
+    anti_autoaim.rect.7.x_max: 2.5
+    anti_autoaim.rect.7.y_min: 1.5
+    anti_autoaim.rect.7.y_max: 2.5
+    enemy_pos_scale: 0.1
+    enemy_pos_is_delta: true
+    tunnel_monitor_topic: tunnel_monitor

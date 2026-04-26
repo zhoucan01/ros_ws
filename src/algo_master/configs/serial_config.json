@@ -1,0 +1,12 @@
+{
+    "robotName": "sentry",
+    "serialPort": {
+        "portName": "/dev/ttyACM0",
+        "baudrate": 115200,
+        "parity": 0,
+        "dataBit": 8,
+        "stopBit": 1,
+        "synchronize": true,
+        "sendInterval": 0
+    }
+}

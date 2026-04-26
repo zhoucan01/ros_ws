@@ -1,0 +1,2 @@
+int16 manual_pos_x
+int16 manual_pos_y

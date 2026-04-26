@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <KeepRunningUntilFailure>
+      <Sequence>
+        
+        <SubTree ID="DecisionSubTree" decision_result="{target_point}"/>
+
+        <ForceSuccess>
+          <ReactiveFallback>
+            <Sequence>
+              <ScriptCondition code="if_need_to_attack == 1"/>
+              <CheckBool flag_name="if_hp_recover" expected="true"/>
+              <AntiAutoAim
+                  target_point_port="{target_point}"
+                  costmap_port="{nav_globalCostmap}"
+                  currentpos_port="{current_pos}"
+                  attack_point_port="{final_attack_point}"
+                  enemy_pos_point_port="{enemy_pos_point}"/>
+              <PublishNavGoal
+                  decision_point_port="{target_point}"
+                  flag_name="{if_need_to_attack}"
+                  attack_point_port="{final_attack_point}"/>
+            </Sequence>
+            <PublishNavGoal
+                decision_point_port="{target_point}"
+                flag_name="{if_need_to_attack}"
+                attack_point_port="{final_attack_point}"/>
+          </ReactiveFallback>
+        </ForceSuccess>
+
+      </Sequence>
+    </KeepRunningUntilFailure>
+  </BehaviorTree>
+
+  <BehaviorTree ID="DecisionSubTree">
+    <Fallback>
+      
+      <Sequence>
+        <CheckBool flag_name="if_hp_less_50" expected="true"/>
+        <SetTargetPoint point="0" target="{decision_result}"/>
+      </Sequence>
+
+      <Sequence>
+        <CheckBool flag_name="if_outpost_destroyed" expected="true"/>
+        <SetTargetPoint point="3" target="{decision_result}"/>
+      </Sequence>
+
+      <SetTargetPoint point="1" target="{decision_result}"/>
+      
+    </Fallback>
+  </BehaviorTree>
+
+  <TreeNodesModel>
+    <Condition ID="CheckBool">
+      <input_port name="flag_name" type="std::string">Flag name in blackboard</input_port>
+      <input_port name="expected" type="bool">Expected value (true/false)</input_port>
+    </Condition>
+    <Action ID="SetTargetPoint">
+      <input_port name="point" type="int">Target point number</input_port>
+      <output_port name="target" type="int">Output target point number</output_port>
+    </Action>
+    <Action ID="PublishNavGoal">
+      <input_port name="decision_point_port" type="int">Target point number</input_port>
+      <input_port name="flag_name" type="int">Attack enable flag</input_port>
+      <input_port name="attack_point_port" type="geometry_msgs::msg::PoseStamped">Attack pose</input_port>
+    </Action>
+    <Action ID="AntiAutoAim">
+      <input_port name="target_point_port" type="int">Initial target point number</input_port>
+      <input_port name="costmap_port" type="nav_msgs::msg::OccupancyGrid">Global costmap</input_port>
+      <input_port name="currentpos_port" type="geometry_msgs::msg::PointStamped">Current robot position</input_port>
+      <input_port name="enemy_pos_point_port" type="geometry_msgs::msg::PointStamped">Enemy offset point</input_port>
+      <output_port name="attack_point_port" type="geometry_msgs::msg::PoseStamped">Final attack pose</output_port>
+    </Action>
+    <Action ID="SentryAttitudeSwitch">
+      <input_port name="sentry_attitude" type="int">Sentry attitude value</input_port>
+    </Action>
+  </TreeNodesModel>
+</root>

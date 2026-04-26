@@ -1,0 +1,14 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/home/ossian/ros_ws/build/sdformat_tools",
+        "/home/zc/ros_ws_zc/ros_ws/install/sdformat_tools/lib/python3.10/site-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/ossian/ros_ws/build/sdformat_tools",
+        "/home/zc/ros_ws_zc/ros_ws/install/sdformat_tools/lib/python3.10/site-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ]
+}

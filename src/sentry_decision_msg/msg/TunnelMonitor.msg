@@ -1,0 +1,23 @@
+bool enable_tunnel_mode
+bool has_pose
+bool has_plan
+bool will_pass_tunnel
+bool in_tunnel
+bool disable_spin
+bool tunnel_recovery_active
+
+int32 target_tunnel_id
+int32 tracked_tunnel_id
+int32 recovery_tunnel_id
+int32 tunnel_status
+
+float64 robot_x
+float64 robot_y
+float64 current_map_yaw
+float64 tunnel_target_yaw
+float64 tunnel_yaw_error
+
+string controller_id
+
+geometry_msgs/PoseStamped global_pose
+geometry_msgs/PoseStamped tunnel_recovery_goal

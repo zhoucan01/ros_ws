@@ -1,0 +1,3 @@
+uint8 if_vision_on
+int16 enemy_pos_x
+int16 enemy_pos_y

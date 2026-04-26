@@ -1,0 +1,5 @@
+int16 projectile_allowance_17mm
+uint16 current_hp
+uint16 my_base_hp
+int16 enemy_hero_x
+int16 enemy_hero_y
