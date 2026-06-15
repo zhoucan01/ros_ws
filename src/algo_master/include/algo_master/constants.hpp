@@ -12,6 +12,7 @@
 // #include "/home/ninja/catkin_ws/devel/include/Navigation_tasks/Navigation2PLCMsg.h"
 #include "sentry_decision_msg/msg/sentry_decision.hpp"
 #include "sentry_decision_msg/msg/enemy_pos.hpp"
+#include "sentry_decision_msg/msg/manual_pos.hpp"
 #include "sentry_decision_msg/msg/referee_raw.hpp"
 /// tf
 // #include "tf2_ros/transform_broadcaster.h"
@@ -70,6 +71,14 @@ algo_master::msg::PLC2Target PLCNavRecv2TargetMsg(const NavSerialMsg &Targetseri
     return plc2target;
 }
 
+sentry_decision_msg::msg::ManualPos PLCNavRecv2ManualPosMsg(const NavSerialMsg &TargetserialRecv)
+{
+    sentry_decision_msg::msg::ManualPos manual_pos;
+    manual_pos.manual_pos_x = TargetserialRecv.target_msg.x;
+    manual_pos.manual_pos_y = TargetserialRecv.target_msg.y;
+    return manual_pos;
+}
+
 
 
 
@@ -78,11 +87,10 @@ sentry_decision_msg::msg::EnemyPos PLCNavRecv2EnemyMsg(const NavSerialMsg &Decis
     sentry_decision_msg::msg::EnemyPos enemy_pos;
 
     enemy_pos.if_vision_on = DecisionserialRecv.Enemy_Pos.If_vision_on;
+    enemy_pos.armor_id = DecisionserialRecv.Enemy_Pos.Armor_id;
     enemy_pos.enemy_pos_x  =  DecisionserialRecv.Enemy_Pos.Enemy_x * cos(current_yaw) - DecisionserialRecv.Enemy_Pos.Enemy_y * sin(current_yaw);
     enemy_pos.enemy_pos_y  =  DecisionserialRecv.Enemy_Pos.Enemy_x * sin(current_yaw) + DecisionserialRecv.Enemy_Pos.Enemy_y * cos(current_yaw);
 
-    // std>>o
-    std::cout << "Enemy_x: " << enemy_pos.enemy_pos_x << " Enemy_y: " << enemy_pos.enemy_pos_y << std::endl;
     return enemy_pos;
 
 }
@@ -143,10 +151,6 @@ sentry_decision_msg::msg::SentryDecision PLCDecisionRecv2DecisionMsg(const Decis
     sentry_decision.if_enemy_small_energy       = (DecisionserialRecv.Decision_Data.Decision_data_4 >> 6) & 1;
     sentry_decision.if_close_to_enemy_out       = (DecisionserialRecv.Decision_Data.Decision_data_4 >> 7) & 1;
     std::cout << "sentry_decision.if_hp_less_100: " << sentry_decision.if_hp_less_100  << std::endl;
-    //  std::cout << "end"<<std::endl;
-    // 剩余时间（注意接收结构体中是 uint16_t，目标中是 uint32_t）
-    sentry_decision.game_remain_time = DecisionserialRecv.Decision_Data.game_remain_time;
-    sentry_decision.game_state = DecisionserialRecv.Decision_Data.game_state;
 
     return sentry_decision;
 }
@@ -159,8 +163,20 @@ sentry_decision_msg::msg::RefereeRaw PLCDecisionRecv2RefereeRawMsg(
         DecisionserialRecv.Referee_Raw_Data.projectile_allowance_17mm;
     referee_raw.current_hp = DecisionserialRecv.Referee_Raw_Data.current_hp;
     referee_raw.my_base_hp = DecisionserialRecv.Referee_Raw_Data.my_base_hp;
+    referee_raw.we_outpost_hp = DecisionserialRecv.Referee_Raw_Data.we_outpost_hp;
+    referee_raw.enemy_outpost_hp = DecisionserialRecv.Referee_Raw_Data.enemy_outpost_hp;
+    referee_raw.game_remain_time = DecisionserialRecv.Decision_Data.game_remain_time;
+    referee_raw.game_state = DecisionserialRecv.Decision_Data.game_state;
+    referee_raw.if_get_manual_msg =
+        DecisionserialRecv.Decision_Update_data.if_get_manual_msg;
+    referee_raw.if_get_radar_msg =
+        DecisionserialRecv.Decision_Update_data.if_get_radar_msg;
     referee_raw.enemy_hero_x = DecisionserialRecv.Referee_Raw_Data.enemy_hero_x;
     referee_raw.enemy_hero_y = DecisionserialRecv.Referee_Raw_Data.enemy_hero_y;
+    referee_raw.real_sentry_attitude_switch =
+        DecisionserialRecv.Referee_Raw_Data.real_sentry_attitude_switch;
+    referee_raw.remaining_energy_flags =
+        DecisionserialRecv.Referee_Raw_Data.remaining_energy_flags;
     return referee_raw;
 }
 

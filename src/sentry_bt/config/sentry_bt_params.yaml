@@ -5,15 +5,26 @@
     use_groot: true
     groot_port: 1666
     decision_point_count: 8
-    #初始点即init_point是建图起点，然后这里的坐标是相对于建图起点的坐标，单位是米。可以根据实际地图和路径进行调整。
-    points.0: [0.5, -0.8]
-    points.1: [2.0, 1.0]
-    points.2: [2.0, 1.0]
-    points.3: [2.0, 1.0]
-    points.4: [2.0, 1.0]
-    points.5: [2.0, 1.0]
-    points.6: [2.0, 1.0]
-    points.7: [2.0, 2.0]
+    field_mirror_enable: false
+    field_length: 28.0
+    field_width: 15.0
+    map_origin_x: 3.76
+    map_origin_y: 8.0
+    # 这里的 points.* 统一填写右下角全局坐标系下的真实点位，单位是米。
+    # sentry_bt 在真正发布给 plc2target / Nav2 前，会统一减去固定 map_origin_x/y，转换成建图起点坐标系。
+    # 当 field_mirror_enable = true 时，固定点和云台手目标会统一做镜像：x' = field_length - x, y' = field_width - y。
+    # 注意：points.0 是决策意义上的起始点，可随换边镜像；map_origin_x/y 是固定建图原点，不随换边变化。
+    #[19.47, 14.04]敌方前哨战    11.87, 9.94己方大符正前方
+    #保守守家点9.25, 3.66  狗洞前10.57,12.76 对方香蕉道起点 19.7, 5.44
+
+    points.0: [3.86, 8.0]
+    points.1: [2.41, 2.64]
+    points.2: [19.47, 14.04]
+    points.3: [11.80, 4.2]
+    points.4: [23.28, 12.37]
+    points.5: [3.76, 8.0]
+    points.6: [23.28, 12.37]
+    points.7: [9.25, 3.66]
     anti_autoaim.attack_radius: 1.5
     anti_autoaim.num_sectors: 36
     anti_autoaim.cost_threshold: 10
@@ -22,18 +33,18 @@
     anti_autoaim.max_visualization_distance: 6.0
     anti_autoaim.marker_scale_base: 0.2
     anti_autoaim.visualize: true
-    anti_autoaim.enable_attack: true
+    anti_autoaim.enable_attack: false
     anti_autoaim.limit_chase_range: false
     anti_autoaim.max_chase_distance: 3.0
     anti_autoaim.distance_weight: 0.6
     anti_autoaim.cost_weight: 0.4
-    anti_autoaim.policy.0.enable: false
-    anti_autoaim.policy.0.limit: true
+    anti_autoaim.policy.0.enable: true
+    anti_autoaim.policy.0.limit: false
 
     anti_autoaim.policy.1.enable: false
     anti_autoaim.policy.1.limit: true
 
-    anti_autoaim.policy.2.enable: true
+    anti_autoaim.policy.2.enable: false
     anti_autoaim.policy.2.limit: true
 
     anti_autoaim.policy.3.enable: false
@@ -42,14 +53,14 @@
     anti_autoaim.policy.4.enable: true
     anti_autoaim.policy.4.limit: false
 
-    anti_autoaim.policy.5.enable: false
-    anti_autoaim.policy.5.limit: true
+    anti_autoaim.policy.5.enable: true
+    anti_autoaim.policy.5.limit: false
 
     anti_autoaim.policy.6.enable: true
-    anti_autoaim.policy.6.limit: true
+    anti_autoaim.policy.6.limit: false
 
     anti_autoaim.policy.7.enable: true
-    anti_autoaim.policy.7.limit: true
+    anti_autoaim.policy.7.limit: false
     anti_autoaim.rect.0.x_min: 0.0
     anti_autoaim.rect.0.x_max: 1.0
     anti_autoaim.rect.0.y_min: -1.3
@@ -85,3 +96,26 @@
     enemy_pos_scale: 0.1
     enemy_pos_is_delta: true
     tunnel_monitor_topic: tunnel_monitor
+    manual_pos_topic: manual_pos_msg
+    attackable_armor_ids: [1, 2, 3, 4, 7]
+    target_far_threshold: 1.5
+    allowance.return_speed: 1.0
+    allowance.return_buffer_s: 3.0
+    opening_outpost_force_time_s: 240
+    attitude.weaken_threshold_s: 180
+    attitude.attack.need_attack: 50
+    attitude.attack.arrived: 35
+    attitude.attack.recently_hurt_penalty: 20
+    attitude.attack.target_far_penalty: 20
+    attitude.attack.target_near_bonus: 15
+    attitude.attack.weakened_penalty: 60
+    attitude.defense.recently_hurt: 20
+    attitude.defense.low_hp: 10
+    attitude.defense.target_far_penalty: 10
+    attitude.defense.target_near_bonus: 5
+    attitude.defense.weakened_penalty: 40
+    attitude.move.target_far: 50
+    attitude.move.arrived_penalty: 10
+    attitude.move.not_arrived_bonus: 20
+    attitude.move.recently_hurt_penalty: 5
+    attitude.move.weakened_penalty: 30

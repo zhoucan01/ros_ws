@@ -30,5 +30,3 @@ uint8 if_chip_base
 uint8 if_hp_less_200
 uint8 if_enemy_small_energy
 uint8 if_close_to_enemy_out
-uint16 game_remain_time
-uint8 game_state

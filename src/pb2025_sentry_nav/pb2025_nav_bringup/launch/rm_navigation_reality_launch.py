@@ -45,6 +45,7 @@ def generate_launch_description():
     rviz_config_file = LaunchConfiguration("rviz_config_file")
     use_robot_state_pub = LaunchConfiguration("use_robot_state_pub")
     use_rviz = LaunchConfiguration("use_rviz")
+    lio_type = LaunchConfiguration("lio_type")
 
     # Declare the launch arguments
     declare_namespace_cmd = DeclareLaunchArgument(
@@ -185,7 +186,8 @@ def generate_launch_description():
             "params_file": params_file,
             "autostart": autostart,
             "use_composition": use_composition,
-            "use_respawn": use_respawn,
+                     "use_respawn": use_respawn,
+                     "lio_type": lio_type,
         }.items(),
     )
 

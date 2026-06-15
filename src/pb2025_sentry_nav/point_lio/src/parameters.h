@@ -1,4 +1,4 @@
-// #ifndef PARAM_H
+﻿// #ifndef PARAM_H
 // #define PARAM_H
 #pragma once
 #include <Python.h>
@@ -87,3 +87,7 @@ void open_file();
 Eigen::Matrix<double, 3, 1> SO3ToEuler(const SO3 & orient);
 void reset_cov(Eigen::Matrix<double, 24, 24> & P_init);
 void reset_cov_output(Eigen::Matrix<double, 30, 30> & P_init_output);
+extern bool wheel_enable;
+extern double wheel_meas_vel_cov;
+extern double wheel_meas_omg_cov;
+extern double wheel_chi2_threshold;

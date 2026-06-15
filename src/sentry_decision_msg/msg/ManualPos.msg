@@ -1,2 +1,2 @@
-int16 manual_pos_x
-int16 manual_pos_y
+float32 manual_pos_x
+float32 manual_pos_y

@@ -18,7 +18,8 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration, PythonExpression, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
@@ -68,6 +69,13 @@ def generate_launch_description():
         default_value="True",
         description="Use simulation (Gazebo) clock if true",
     )
+
+    declare_lio_type_cmd = DeclareLaunchArgument(
+        "lio_type",
+        default_value="small",
+        description="LIO implementation: 'point' for Point-LIO, 'small' for small_point_lio",
+    )
+
 
     declare_autostart_cmd = DeclareLaunchArgument(
         "autostart",
@@ -143,6 +151,7 @@ def generate_launch_description():
         package="point_lio",
         executable="pointlio_mapping",
         name="point_lio",
+        condition=IfCondition(PythonExpression(['"', lio_type, '" == "point"'])),
         output="screen",
         respawn=use_respawn,
         respawn_delay=2.0,
@@ -150,6 +159,34 @@ def generate_launch_description():
             configured_params,
             {"prior_pcd.enable": False},
             {"pcd_save.pcd_save_en": True},
+        ],
+        arguments=["--ros-args", "--log-level", log_level],
+    )
+
+    start_wheel_observer_node = Node(
+        package="wheel_observer",
+        executable="wheel_observer_node",
+        name="wheel_observer",
+        condition=IfCondition(PythonExpression(['"', lio_type, '" == "small"'])),
+        output="screen",
+        parameters=[{"input_topic": "/wheel_odom",
+                     "output_topic": "/wheel_odom_transformed",
+                     "output_frame_id": "base_link",
+                     "enable_yaw_correction": False}],
+        arguments=["--ros-args", "--log-level", log_level],
+    )
+
+    start_small_point_lio_node = Node(
+        package="small_point_lio",
+        executable="small_point_lio_node",
+        name="small_point_lio",
+        condition=IfCondition(PythonExpression(['"', lio_type, '" == "small"'])),
+        output="screen",
+        respawn=use_respawn,
+        respawn_delay=2.0,
+        parameters=[
+            configured_params,
+            {"enable_wheel_fusion": True},
         ],
         arguments=["--ros-args", "--log-level", log_level],
     )
@@ -185,6 +222,7 @@ def generate_launch_description():
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_use_sim_time_cmd)
+    ld.add_action(declare_lio_type_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
@@ -196,6 +234,8 @@ def generate_launch_description():
     ld.add_action(start_pointcloud_to_laserscan_node)
     ld.add_action(start_sync_slam_toolbox_node)
     ld.add_action(start_point_lio_node)
+    ld.add_action(start_small_point_lio_node)
+    ld.add_action(start_wheel_observer_node)
     ld.add_action(start_static_transform_node)
 
     return ld

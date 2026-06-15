@@ -16,6 +16,14 @@
 #include <mutex>
 #include <string>
 
+#ifndef BT_PLUGIN_EXPORT
+#if defined(_WIN32)
+#define BT_PLUGIN_EXPORT __declspec(dllexport)
+#else
+#define BT_PLUGIN_EXPORT __attribute__((visibility("default")))
+#endif
+#endif
+
 #include "behaviortree_cpp_v3/action_node.h"
 #include "behaviortree_cpp_v3/bt_factory.h"
 #include "geometry_msgs/msg/pose_stamped.hpp"
@@ -102,7 +110,7 @@ private:
 
 }  // namespace pb_nav2_bt_nodes
 
-BT_REGISTER_NODES(factory)
+extern "C" BT_PLUGIN_EXPORT void BT_RegisterNodesFromPlugin(BT::BehaviorTreeFactory & factory)
 {
   factory.registerNodeType<pb_nav2_bt_nodes::SelectPoseByTopic>("SelectPoseByTopic");
 }

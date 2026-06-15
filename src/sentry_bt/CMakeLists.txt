@@ -16,6 +16,7 @@ find_package(tf2_ros REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(algo_master REQUIRED)
+find_package(std_msgs REQUIRED)
 
 # find_package(algo_master REQUIRED)
 
@@ -37,6 +38,7 @@ ament_target_dependencies(sentry_bt_node
   nav2_msgs
   visualization_msgs
   algo_master
+  std_msgs
   
 
   # algo_master

@@ -1,0 +1,7 @@
+/.idea
+/.cache
+/build
+/rosbag*
+/logs
+.env
+*.pcd

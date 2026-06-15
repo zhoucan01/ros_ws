@@ -52,6 +52,7 @@ BT::PortsList AntiAutoAim::providedPorts()
       BT::InputPort<nav_msgs::msg::OccupancyGrid>("costmap_port", "Global costmap"),
       BT::InputPort<geometry_msgs::msg::PointStamped>("currentpos_port", "currentpos port"),
       BT::OutputPort<geometry_msgs::msg::PoseStamped>("attack_point_port", "Output target attack point"),
+      BT::OutputPort<bool>("attack_target_valid", "Whether attack target is valid"),
       BT::InputPort<geometry_msgs::msg::PointStamped>("enemy_pos_point_port", "currentpos port"),};
 
 }
@@ -76,6 +77,7 @@ BT::NodeStatus AntiAutoAim::tick()
   {
     if (!policy.enable)
     {
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
     }
   }
@@ -83,6 +85,7 @@ BT::NodeStatus AntiAutoAim::tick()
   {
     if (!params_.enable_attack)
     {
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
     }
   }
@@ -96,16 +99,19 @@ BT::NodeStatus AntiAutoAim::tick()
   if (!global_costmap)
   {
     RCLCPP_ERROR(node_->get_logger(), "Missing required input: costmap_port");
+    setOutput("attack_target_valid", false);
     return BT::NodeStatus::FAILURE; // 修正返回类型
   }
   if (!current_pos)
   {
     RCLCPP_ERROR(node_->get_logger(), "Missing required input: currentpos_port");
+    setOutput("attack_target_valid", false);
     return BT::NodeStatus::FAILURE;
   }
   if (!enemy_pos_point_)
   {
     RCLCPP_ERROR(node_->get_logger(), "Missing required input: enemy_pos_point_port");
+    setOutput("attack_target_valid", false);
     return BT::NodeStatus::FAILURE;
   }
 
@@ -124,6 +130,7 @@ BT::NodeStatus AntiAutoAim::tick()
   if (feasible_points.empty())
   {
       RCLCPP_WARN(node_->get_logger(), "No feasible points available, cannot determine attack point");
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
   }
 
@@ -135,12 +142,14 @@ BT::NodeStatus AntiAutoAim::tick()
     if (!target_point_input)
     {
       RCLCPP_WARN(node_->get_logger(), "limit_chase_range enabled but target_point_port missing");
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
     }
 
     if (!getDecisionPointRect(target_point_input.value(), limit_rect))
     {
       RCLCPP_WARN(node_->get_logger(), "limit_chase_range enabled but decision rectangle not found");
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
     }
     has_limit_rect = true;
@@ -158,6 +167,7 @@ BT::NodeStatus AntiAutoAim::tick()
     if (limited.empty())
     {
       RCLCPP_WARN(node_->get_logger(), "No feasible points inside chase rectangle");
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
     }
     feasible_points.swap(limited);
@@ -176,6 +186,7 @@ BT::NodeStatus AntiAutoAim::tick()
   // RCLCPP_INFO(node_->get_logger(), "attack_pose: x=%.2f, y=%.2f", attack_pose.pose.position.x, attack_pose.pose.position.y);
 
   setOutput("attack_point_port", attack_pose);
+  setOutput("attack_target_valid", true);
 
   if (params_.visualize)
   {

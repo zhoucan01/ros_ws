@@ -89,12 +89,16 @@ protected:
   rclcpp::Client<nav2_msgs::srv::GetCostmap>::SharedPtr costmap_client_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::MarkerArray>>
     marker_pub_;
+  rclcpp::TimerBase::SharedPtr status_timer_;
   double twist_x_, twist_y_;
 
   // parameters
   std::string service_name_;
   double max_radius_;
   bool visualize_;
+  size_t trigger_count_{0};
+  size_t cycle_count_{0};
+  bool active_{false};
 };
 
 }  // namespace pb_nav2_behaviors

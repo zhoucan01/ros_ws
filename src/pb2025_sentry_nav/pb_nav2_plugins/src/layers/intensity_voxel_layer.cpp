@@ -57,6 +57,11 @@ void IntensityVoxelLayer::onInitialize()
 {
   auto node = node_.lock();
   clock_ = node->get_clock();
+  publish_free_pass_mask_ = false;
+  log_free_pass_mask_hits_ = false;
+  free_pass_mask_publish_period_sec_ = 1.0;
+  free_pass_mask_filtered_points_cycle_ = 0;
+  free_pass_mask_filtered_points_total_ = 0;
   ObstacleLayer::onInitialize();
   footprint_clearing_enabled_ =
     node->get_parameter(name_ + ".footprint_clearing_enabled").as_bool();
@@ -89,7 +94,7 @@ void IntensityVoxelLayer::loadFreePassMask(
 {
   free_pass_mask_enabled_ = node->declare_parameter(name_ + ".free_pass_mask.enabled", false);
   free_pass_mask_yaml_filename_ =
-    node->declare_parameter(name_ + ".free_pass_mask.yaml_filename", std::string(""));
+    node->declare_parameter(name_ + ".free_pass_mask.mask_yaml_filename", std::string(""));
 
   free_pass_mask_frame_.clear();
   free_pass_mask_resolution_ = 0.0;
@@ -100,13 +105,22 @@ void IntensityVoxelLayer::loadFreePassMask(
   free_pass_mask_width_ = 0;
   free_pass_mask_height_ = 0;
   free_pass_mask_data_.clear();
+  free_pass_mask_pub_.reset();
+  free_pass_mask_timer_.reset();
 
   if (!free_pass_mask_enabled_) {
     return;
   }
 
+  publish_free_pass_mask_ =
+    node->declare_parameter(name_ + ".free_pass_mask.publish", true);
+  log_free_pass_mask_hits_ =
+    node->declare_parameter(name_ + ".free_pass_mask.log_hits", true);
+  free_pass_mask_publish_period_sec_ =
+    node->declare_parameter(name_ + ".free_pass_mask.publish_period_sec", 1.0);
+
   if (free_pass_mask_yaml_filename_.empty()) {
-    throw std::runtime_error("IntensityVoxelLayer free_pass_mask is enabled but yaml_filename is empty");
+    throw std::runtime_error("IntensityVoxelLayer free_pass_mask is enabled but mask_yaml_filename is empty");
   }
 
   const auto mask_yaml = YAML::LoadFile(free_pass_mask_yaml_filename_);
@@ -119,7 +133,8 @@ void IntensityVoxelLayer::loadFreePassMask(
     throw std::runtime_error("IntensityVoxelLayer free_pass_mask yaml is missing image/resolution/origin");
   }
 
-  std::string image_path = image_path_node.as<std::string>();
+  const std::string image_field = image_path_node.as<std::string>();
+  std::string image_path = image_field;
   if (!image_path.empty() && image_path.front() != '/') {
     const auto slash = free_pass_mask_yaml_filename_.find_last_of('/');
     const std::string base_dir =
@@ -136,6 +151,67 @@ void IntensityVoxelLayer::loadFreePassMask(
   free_pass_mask_frame_ =
     node->declare_parameter(name_ + ".free_pass_mask.frame_id", layered_costmap_->getGlobalFrameID());
   free_pass_mask_data_ = loadPgmImage(image_path, free_pass_mask_width_, free_pass_mask_height_);
+
+  size_t masked_cell_count = 0;
+  for (const auto pixel : free_pass_mask_data_) {
+    const double normalized = static_cast<double>(pixel) / 255.0;
+    const double occupancy = free_pass_mask_negate_ ? normalized : 1.0 - normalized;
+    if (occupancy >= free_pass_mask_occupied_threshold_) {
+      ++masked_cell_count;
+    }
+  }
+
+  RCLCPP_INFO(
+    node->get_logger(),
+    "%s loaded free_pass_mask yaml='%s', image_field='%s', resolved_image='%s' (%u x %u, frame='%s', masked_cells=%zu/%zu, occupied_thresh=%.2f, negate=%s)",
+    name_.c_str(), free_pass_mask_yaml_filename_.c_str(), image_field.c_str(), image_path.c_str(),
+    free_pass_mask_width_, free_pass_mask_height_,
+    free_pass_mask_frame_.c_str(), masked_cell_count, free_pass_mask_data_.size(),
+    free_pass_mask_occupied_threshold_, free_pass_mask_negate_ ? "true" : "false");
+
+  if (publish_free_pass_mask_) {
+    free_pass_mask_pub_ = node->create_publisher<nav_msgs::msg::OccupancyGrid>(
+      name_ + "/free_pass_mask", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
+    publishFreePassMask();
+    const auto publish_period = std::chrono::duration<double>(
+      std::max(0.1, free_pass_mask_publish_period_sec_));
+    free_pass_mask_timer_ = node->create_wall_timer(
+      std::chrono::duration_cast<std::chrono::milliseconds>(publish_period),
+      std::bind(&IntensityVoxelLayer::publishFreePassMask, this));
+  }
+}
+
+void IntensityVoxelLayer::publishFreePassMask()
+{
+  if (!free_pass_mask_pub_ || free_pass_mask_data_.empty()) {
+    return;
+  }
+
+  nav_msgs::msg::OccupancyGrid msg;
+  msg.header.stamp = clock_->now();
+  msg.header.frame_id = free_pass_mask_frame_;
+  msg.info.map_load_time = msg.header.stamp;
+  msg.info.resolution = static_cast<float>(free_pass_mask_resolution_);
+  msg.info.width = free_pass_mask_width_;
+  msg.info.height = free_pass_mask_height_;
+  msg.info.origin.position.x = free_pass_mask_origin_x_;
+  msg.info.origin.position.y = free_pass_mask_origin_y_;
+  msg.info.origin.position.z = 0.0;
+  msg.info.origin.orientation.w = 1.0;
+  msg.data.resize(static_cast<size_t>(free_pass_mask_width_) * free_pass_mask_height_, 0);
+
+  for (unsigned int image_y = 0; image_y < free_pass_mask_height_; ++image_y) {
+    const unsigned int grid_y = free_pass_mask_height_ - 1 - image_y;
+    for (unsigned int x = 0; x < free_pass_mask_width_; ++x) {
+      const unsigned int src_index = image_y * free_pass_mask_width_ + x;
+      const unsigned int dst_index = grid_y * free_pass_mask_width_ + x;
+      const double normalized = static_cast<double>(free_pass_mask_data_[src_index]) / 255.0;
+      const double occupancy = free_pass_mask_negate_ ? normalized : 1.0 - normalized;
+      msg.data[dst_index] = occupancy >= free_pass_mask_occupied_threshold_ ? 100 : 0;
+    }
+  }
+
+  free_pass_mask_pub_->publish(msg);
 }
 
 std::vector<uint8_t> IntensityVoxelLayer::loadPgmImage(
@@ -255,6 +331,8 @@ void IntensityVoxelLayer::updateBounds(
   double robot_x, double robot_y, double robot_yaw, double * min_x, double * min_y, double * max_x,
   double * max_y)
 {
+  free_pass_mask_filtered_points_cycle_ = 0;
+
   if (rolling_window_) {
     updateOrigin(robot_x - getSizeInMetersX() / 2, robot_y - getSizeInMetersY() / 2);
   }
@@ -303,6 +381,8 @@ void IntensityVoxelLayer::updateBounds(
 
       const rclcpp::Time point_stamp(obs.cloud_->header.stamp);
       if (isInFreePassMask(px, py, point_stamp)) {
+        ++free_pass_mask_filtered_points_cycle_;
+        ++free_pass_mask_filtered_points_total_;
         continue;
       }
 
@@ -321,6 +401,14 @@ void IntensityVoxelLayer::updateBounds(
         touch(px, py, min_x, min_y, max_x, max_y);
       }
     }
+  }
+
+  if (free_pass_mask_enabled_ && log_free_pass_mask_hits_ && free_pass_mask_filtered_points_cycle_ > 0) {
+    auto node = node_.lock();
+    RCLCPP_INFO_THROTTLE(
+      node->get_logger(), *clock_, 2000,
+      "%s filtered %zu points by free_pass_mask in this cycle (%zu total)",
+      name_.c_str(), free_pass_mask_filtered_points_cycle_, free_pass_mask_filtered_points_total_);
   }
 
   if (publish_voxel_) {

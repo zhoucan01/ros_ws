@@ -39,8 +39,6 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("robot_base_frame", "");
   this->declare_parameter("lidar_frame", "");
   this->declare_parameter("prior_pcd_file", "");
-  this->declare_parameter("init_pose", std::vector<double>{0., 0., 0., 0., 0., 0.});
-  this->declare_parameter("input_cloud_topic", "registered_scan");
 
   this->get_parameter("num_threads", num_threads_);
   this->get_parameter("num_neighbors", num_neighbors_);
@@ -53,18 +51,6 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("robot_base_frame", robot_base_frame_);
   this->get_parameter("lidar_frame", lidar_frame_);
   this->get_parameter("prior_pcd_file", prior_pcd_file_);
-  this->get_parameter("init_pose", init_pose_);
-  this->get_parameter("input_cloud_topic", input_cloud_topic_);
-
-  // [x, y, z, roll, pitch, yaw] - init_pose parameters
-  if (!init_pose_.empty() && init_pose_.size() >= 6) {
-    result_t_.translation() << init_pose_[0], init_pose_[1], init_pose_[2];
-    result_t_.linear() =
-      Eigen::AngleAxisd(init_pose_[5], Eigen::Vector3d::UnitZ()) *
-      Eigen::AngleAxisd(init_pose_[4], Eigen::Vector3d::UnitY()) *
-      Eigen::AngleAxisd(init_pose_[3], Eigen::Vector3d::UnitX()).toRotationMatrix();
-  }
-  previous_result_t_ = result_t_;
 
   accumulated_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
   global_map_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
@@ -90,7 +76,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
     target_, small_gicp::KdTreeBuilderOMP(num_threads_));
 
   pcd_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-    input_cloud_topic_, 10,
+    "registered_scan", 10,
     std::bind(&SmallGicpRelocalizationNode::registeredPcdCallback, this, std::placeholders::_1));
 
   initial_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(

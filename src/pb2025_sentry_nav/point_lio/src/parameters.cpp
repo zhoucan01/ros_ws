@@ -1,4 +1,4 @@
-#include "parameters.h"
+﻿#include "parameters.h"
 
 bool is_first_frame = true;
 double lidar_end_time = 0.0, first_lidar_time = 0.0, time_con = 0.0;
@@ -27,6 +27,10 @@ double laser_point_cov = 0.01, acc_norm;
 double vel_cov, acc_cov_input, gyr_cov_input;
 double gyr_cov_output, acc_cov_output, b_gyr_cov, b_acc_cov;
 double imu_meas_acc_cov, imu_meas_omg_cov;
+bool wheel_enable = false;
+double wheel_meas_vel_cov = 1.0;
+double wheel_meas_omg_cov = 10.0;
+double wheel_chi2_threshold = 3.0;
 int lidar_type, pcd_save_interval;
 std::vector<double> gravity_init, gravity;
 bool runtime_pos_log, pcd_save_en, path_en, extrinsic_est_en = true;

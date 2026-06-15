@@ -21,6 +21,7 @@ ament_auto_add_library(pb_back_up_frees_space_behavior SHARED
 
 ament_auto_add_library(pb_nav2_layers SHARED
   src/layers/intensity_voxel_layer.cpp
+  src/layers/tunnel_cost_layer.cpp
 )
 
 target_link_libraries(pb_nav2_layers yaml-cpp)
@@ -48,6 +49,10 @@ find_package(ament_lint_auto REQUIRED)
 endif()
 
 pluginlib_export_plugin_description_file(nav2_core behavior_plugin.xml)
+ament_auto_add_executable(tunnel_strategy_node src/tunnel_strategy_node.cpp)
+target_link_libraries(tunnel_strategy_node ${dependencies})
 pluginlib_export_plugin_description_file(nav2_costmap_2d costmap_plugins.xml)
+ament_auto_add_executable(tunnel_strategy_node src/tunnel_strategy_node.cpp)
+target_link_libraries(tunnel_strategy_node ${dependencies})
 
 ament_auto_package()

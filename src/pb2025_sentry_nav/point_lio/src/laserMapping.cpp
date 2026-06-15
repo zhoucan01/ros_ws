@@ -1,4 +1,4 @@
-// #include <so3_math.h>
+﻿// #include <so3_math.h>
 #include <malloc.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
@@ -6,7 +6,8 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <tf2_ros/transform_broadcaster.h>
-#include <tf2_ros/transform_listener.h>
+ #include <tf2_ros/transform_listener.h>
+ #include <geometry_msgs/msg/twist.hpp>
 
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -378,7 +379,53 @@ int main(int argc, char ** argv)
       [](const sensor_msgs::msg::PointCloud2::SharedPtr msg) { standard_pcl_cbk(msg); });
   }
   auto sub_imu =
-    nh->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS(), imu_cbk);
+     nh->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS(), imu_cbk);
+ 
+     /* Wheel odometry: subscribes to /wheel_odom from algo_master (already in IMU frame) */
+     auto wheel_sub = nh->create_subscription<geometry_msgs::msg::Twist>(
+         "/wheel_odom_transformed", rclcpp::SensorDataQoS(),
+         [](const geometry_msgs::msg::Twist::SharedPtr msg) {
+             auto &x = kf_input.x_;
+             auto &P = kf_input.P_;
+             double vx = msg->linear.x, vy = msg->linear.y;
+ 
+             /* Predict body-frame velocity from state */
+             Eigen::Matrix3d R(x.rot);
+             Eigen::Vector3d v_body_pred = R.transpose() * x.vel;
+ 
+             /* Innovation */
+             Eigen::Matrix<double, 2, 1> innov;
+             innov << vx - v_body_pred(0), vy - v_body_pred(1);
+ 
+             /* Chi-squared outlier: skip if wheel data is obviously wrong */
+             if (innov.norm() > 3.0) return;
+ 
+             /* Jacobian H(2x24): only δθ(3-5) and δv(6-8) affect body-frame velocity */
+             Eigen::Matrix<double, 2, 24> H;
+             H.setZero();
+             H.block<2,3>(0, 3)  = -(R.transpose() * skew(x.vel)).topRows<2>();
+             H.block<2,3>(0, 6)  = R.transpose().topRows<2>();
+ 
+             /* Measurement noise */
+             Eigen::Matrix2d R_wheel = Eigen::Matrix2d::Identity() * 0.01;
+ 
+             /* EKF update */
+             auto S = H * P * H.transpose() + R_wheel;
+             auto K = P * H.transpose() * S.inverse();
+             Eigen::Matrix<double, 24, 1> dx = K * innov;
+ 
+             /* Nominal state retraction (manifold) */
+             x.pos += dx.block<3,1>(0,0);
+             x.rot  = x.rot * SO3::exp(dx.block<3,1>(3,0));
+             x.vel += dx.block<3,1>(6,0);
+             x.bg  += dx.block<3,1>(9,0);
+             x.ba  += dx.block<3,1>(12,0);
+ 
+             /* Covariance */
+             Eigen::Matrix<double, 24, 24> I; I.setIdentity();
+             P = (I - K * H) * P;
+         }
+     );
   auto pub_laser_cloud_full_res =
     nh->create_publisher<sensor_msgs::msg::PointCloud2>("cloud_registered", 20);
   auto pub_laser_cloud_full_res_body =

@@ -48,7 +48,8 @@ def generate_launch_description():
     params_file = LaunchConfiguration("params_file")
     autostart = LaunchConfiguration("autostart")
     use_composition = LaunchConfiguration("use_composition")
-    use_respawn = LaunchConfiguration("use_respawn")
+     use_respawn = LaunchConfiguration("use_respawn")
+     lio_type = LaunchConfiguration("lio_type")
     log_level = LaunchConfiguration("log_level")
 
     # Create our own temporary YAML files that include substitutions
@@ -127,6 +128,11 @@ def generate_launch_description():
     )
 
     declare_use_respawn_cmd = DeclareLaunchArgument(
+    declare_lio_type_cmd = DeclareLaunchArgument(
+        "lio_type",
+        default_value="point",
+        description="LIO implementation: point or small",
+    )
         "use_respawn",
         default_value="False",
         description="Whether to respawn if a node crashes. Applied when composition is disabled.",
@@ -161,7 +167,8 @@ def generate_launch_description():
                     "use_sim_time": use_sim_time,
                     "autostart": autostart,
                     "use_respawn": use_respawn,
-                    "params_file": params_file,
+                     "params_file": params_file,
+                     "lio_type": lio_type,
                 }.items(),
             ),
             IncludeLaunchDescription(
@@ -215,6 +222,7 @@ def generate_launch_description():
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_use_respawn_cmd)
+    ld.add_action(declare_lio_type_cmd)
     ld.add_action(declare_log_level_cmd)
 
     # Add the actions to launch all of the navigation nodes

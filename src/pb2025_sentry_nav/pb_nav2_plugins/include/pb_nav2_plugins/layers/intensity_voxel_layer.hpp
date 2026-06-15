@@ -27,6 +27,7 @@
 #include "geometry_msgs/msg/point_stamped.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
+#include "rclcpp/timer.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "sensor_msgs/msg/point_cloud.hpp"
 #include "sensor_msgs/msg/point_cloud2.h"
@@ -70,11 +71,18 @@ protected:
 private:
   bool publish_voxel_;
   rclcpp::Publisher<nav2_msgs::msg::VoxelGrid>::SharedPtr voxel_pub_;
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr free_pass_mask_pub_;
+  rclcpp::TimerBase::SharedPtr free_pass_mask_timer_;
   nav2_voxel_grid::VoxelGrid voxel_grid_;
   double z_resolution_, origin_z_;
   double min_obstacle_intensity_, max_obstacle_intensity_;
   unsigned int unknown_threshold_, mark_threshold_, size_z_;
   rclcpp::Clock::SharedPtr clock_;
+  bool publish_free_pass_mask_{};
+  bool log_free_pass_mask_hits_{};
+  double free_pass_mask_publish_period_sec_{};
+  size_t free_pass_mask_filtered_points_cycle_{};
+  size_t free_pass_mask_filtered_points_total_{};
 
   inline bool worldToMap3DFloat(
     double wx, double wy, double wz, double & mx, double & my, double & mz)
@@ -118,6 +126,7 @@ private:
 
   bool isInFreePassMask(double px, double py, const rclcpp::Time & stamp) const;
   void loadFreePassMask(const std::shared_ptr<rclcpp_lifecycle::LifecycleNode> & node);
+  void publishFreePassMask();
   static std::vector<uint8_t> loadPgmImage(
     const std::string & image_path, unsigned int & width, unsigned int & height);
 

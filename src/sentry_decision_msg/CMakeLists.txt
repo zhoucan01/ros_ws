@@ -13,6 +13,7 @@ find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
       "msg/SentryDecision.msg"
+      "msg/HostDecision.msg"
       "msg/EnemyPos.msg"
       "msg/ManualPos.msg"
       "msg/AttitudeSwitch.msg"

@@ -4,6 +4,11 @@
 
 当前版本里，它除了原来的速度、位置、路径状态回传之外，还已经接入了过洞聚合消息 `TunnelMonitor`，可以把“是否需要过洞”和“过洞目标朝向差值”继续转发到下位机。
 
+另外，当前版本还打通了两条姿态相关链路：
+
+- 下发链路：行为树期望姿态 -> `NavigationPLCSendMsg.sentry_attitude_switch`
+- 上行链路：下位机/裁判系统真实姿态 -> `RefereeRaw.msg.real_sentry_attitude_switch`
+
 ## 1. 包内结构
 
 ```text
@@ -101,6 +106,11 @@ Referee_Raw_Data
 - `uint16 projectile_allowance_17mm`
 - `uint16 current_hp`
 - `uint16 my_base_hp`
+- `uint16 we_outpost_hp`
+- `uint16 enemy_outpost_hp`
+- `uint16 game_remain_time`
+- `uint8 game_state`
+- `uint8 real_sentry_attitude_switch`
 - `int16 enemy_hero_x`
 - `int16 enemy_hero_y`
 
@@ -130,6 +140,8 @@ Referee_Raw_Data
 - `close_flag`
 - `need_tunnel`
 - `tunnel_yaw_error`
+- `if_on_attack`
+- `sentry_attitude_switch`
 
 其中这两个是本轮新增字段：
 
@@ -139,6 +151,13 @@ Referee_Raw_Data
 - `tunnel_yaw_error`
   - 当前过洞目标朝向与机器人当前朝向的差值
   - 直接来自 `TunnelMonitor.tunnel_yaw_error`
+
+另外还有：
+
+- `if_on_attack`
+  - 当前最终输出目标是否为追击目标
+- `sentry_attitude_switch`
+  - 上位机当前下发给下位机的目标姿态
 
 发送触发时机：
 
@@ -181,10 +200,12 @@ Referee_Raw_Data
 - `decision_msg`
   - 类型：`sentry_decision_msg/msg/SentryDecision`
   - 来源：决策串口帧中的 `Decision_Data`
+  - 当前主要保留“下位机已经算好的决策 bool”
 
 - `referee_raw_msg`
   - 类型：`sentry_decision_msg/msg/RefereeRaw`
   - 来源：决策串口帧中的 `Referee_Raw_Data`
+  - 当前同时承载裁判系统原始量、比赛时间/状态，以及下位机回传的真实姿态 `real_sentry_attitude_switch`
 
 - `enemy_msg`
   - 类型：`sentry_decision_msg/msg/EnemyPos`
@@ -228,6 +249,10 @@ Referee_Raw_Data
 - `tunnel_monitor`
   - 类型：`sentry_decision_msg/msg/TunnelMonitor`
   - 用来获取过洞状态和朝向差值，并继续转发到下位机
+
+- `attitude_switch`
+  - 类型：`sentry_decision_msg/msg/AttitudeSwitch`
+  - 用来接收行为树期望姿态，并继续转发到下位机串口发送包
 
 ### 6.3 Action Client
 

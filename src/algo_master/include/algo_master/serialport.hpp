@@ -19,7 +19,7 @@
 #include <errno.h>
 
 
-const std::vector<std::string> kAlternativePorts = {"/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2", "/dev/ttyUSB0"};
+const std::vector<std::string> kAlternativePorts = {"/dev/ttyACM0"};
 std::string Portname;
 #pragma pack(push, 1)
 struct NavigationPLCSendMsg
@@ -36,6 +36,9 @@ struct NavigationPLCSendMsg
     uint8_t close_flag;
     uint8_t need_tunnel;
     float tunnel_yaw_error;
+    uint8_t if_on_attack;//是否正在追击
+    uint8_t sentry_attitude_switch;//姿态切换
+    float current_map_yaw;
     uint8_t seq;
     uint8_t m_FrameTail = 0xAA;
 };
@@ -49,7 +52,6 @@ struct NavSerialMsg
 {
     uint8_t m_FrameHead = 0xA5;
     uint8_t msg_id = kNavFrameMsgId;
-
     struct Target
     {
         float x{};
@@ -62,12 +64,19 @@ struct NavSerialMsg
         float m_ImuPitch{};
     } imu_msg;
 
-    struct EnemyPos
-    {
-        uint8_t If_vision_on;
-        int16_t Enemy_x;
-        int16_t Enemy_y;
-    } Enemy_Pos;
+     struct EnemyPos {
+         uint8_t If_vision_on;
+         uint8_t Armor_id;
+         int16_t Enemy_x;
+         int16_t Enemy_y;
+     } Enemy_Pos;
+ 
+     /* Wheel odometry + gimbal yaw (for transforming chassis → IMU frame) */
+     int16_t vx_wheel;        // chassis vx * 10000 (mm/s)
+     int16_t vy_wheel;        // chassis vy * 10000 (mm/s)
+     float   gimbal_yaw;      // gimbal yaw relative to chassis (rad)
+
+
 
     uint8_t m_FrameTail = 0xAA;
 };
@@ -92,9 +101,19 @@ struct DecisionSerialMsg
         uint16_t projectile_allowance_17mm{};
         uint16_t current_hp{};
         uint16_t my_base_hp{};
+        uint16_t we_outpost_hp{};
+        uint16_t enemy_outpost_hp{};
         int16_t enemy_hero_x{};
         int16_t enemy_hero_y{};
+        uint8_t real_sentry_attitude_switch{};
+        uint8_t remaining_energy_flags{};
     } Referee_Raw_Data;
+
+        struct Get_decision_Msg//决策端是否收到这些决策源的数据
+    {
+        uint8_t if_get_manual_msg;
+        uint8_t if_get_radar_msg;//
+    }Decision_Update_data;
 
     uint8_t m_FrameTail = 0xAA;
 };
@@ -292,6 +311,9 @@ bool NautilusSerialPort::m_Open(const char *portname,
         return false;
     }
 
+    // 显式启用本地连接和接收器，避免某些设备默认不接收数据。
+    options.c_cflag |= (CLOCAL | CREAD);
+
     // 设置停止位
     switch (stopbit)
     {
@@ -311,6 +333,12 @@ bool NautilusSerialPort::m_Open(const char *portname,
     options.c_oflag &= ~OPOST;
     options.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
     options.c_iflag &= ~(ICRNL | IGNCR);
+    options.c_cc[VMIN] = 0;
+    options.c_cc[VTIME] = 0;
+
+    spdlog::info(
+        "Opening serial port {} with {}-{}-{}-{}",
+        portname, baudrate, static_cast<int>(databit), static_cast<int>(parity), static_cast<int>(stopbit));
 
     // 激活新配置
     if ((tcsetattr(pHandle[0], TCSANOW, &options)) != 0)
@@ -399,14 +427,21 @@ bool NautilusSerialPort::OpenPort(const std::string &portname, int baudrate, cha
 void NautilusSerialPort::ReadRawBuf()
 {
     RawBufRecv rawBuf;
+    bool first_frame_logged = false;
     while (true)
     {
         rawBuf.fill(0); ////将所有的元素填充为0
         if (!port_available)
             continue;
         ////array的成员函数data返回数组首个元素的指针
-        if (m_Receive(rawBuf.data(), rawBuf.size()) > 0)
+        const int received_len = m_Receive(rawBuf.data(), rawBuf.size());
+        if (received_len > 0)
         {
+            if (!first_frame_logged)
+            {
+                spdlog::info("First serial read received {} bytes from {}", received_len, m_Portname);
+                first_frame_logged = true;
+            }
             msgRawBufs.Push(rawBuf);
             ////最后一次压入缓存区的时间戳
             last_received = std::chrono::steady_clock::now();
@@ -547,17 +582,22 @@ bool NautilusSerialPort::Send(const NavigationPLCSendMsg &payload)
 void NautilusSerialPort::CheckAndReconnect()
 {
     static constexpr long long timeout = 1000;  // 超时时间（毫秒）
-    
-    // 创建单线程执行器和节点
-    rclcpp::executors::SingleThreadedExecutor executor;
-    auto node = std::make_shared<rclcpp::Node>("serial_port_node");
-    executor.add_node(node);
+    bool waiting_for_first_frame_logged = false;
+
+    spdlog::info("CheckAndReconnect thread started for initial port {}", m_Portname);
 
     while (true)
     {
         // 如果 last_received 没有被初始化，则跳过检查
-        if (last_received == std::chrono::steady_clock::time_point())
+        if (last_received == std::chrono::steady_clock::time_point()) {
+            if (!waiting_for_first_frame_logged) {
+                spdlog::info("CheckAndReconnect waiting for first received frame before timeout monitoring starts");
+                waiting_for_first_frame_logged = true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
+        }
+        waiting_for_first_frame_logged = false;
 
         // 计算从上次接收到数据到现在的时间间隔
         auto now = std::chrono::steady_clock::now();
@@ -566,16 +606,17 @@ void NautilusSerialPort::CheckAndReconnect()
         // 如果超时未接收到数据，则尝试重新连接
         if (duration.count() >= timeout)
         {
-            spdlog::error("Connection on {} failed, trying other serialports", m_Portname);
+            spdlog::warn(
+                "No serial frame received from {} for {} ms, starting reconnect attempts",
+                m_Portname, duration.count());
 
             size_t idx = 0;
-            rclcpp::Rate rate(1);  // 设置频率为 1 Hz
-
             while (true)
             {
                 // 获取替代串口名称
                 std::string alternative_port = kAlternativePorts[idx];
                 idx = (idx + 1) % kAlternativePorts.size();
+                spdlog::info("Trying alternative serial port {}", alternative_port);
 
                 port_available = false;
 
@@ -583,17 +624,19 @@ void NautilusSerialPort::CheckAndReconnect()
                 ClosePort();
                 if (OpenPort(alternative_port, m_Baudrate, m_Parity, m_Databit, m_Stopbit, m_Synchronizeflag))
                 {
-                    spdlog::info("Connected to {}", m_Portname);
+                    spdlog::info(
+                        "Reconnected serial port on {} after timeout/reflash recovery attempt",
+                        m_Portname);
                     port_available = true;
+                    last_received = std::chrono::steady_clock::now();
                     break;
                 }
 
-                // 处理回调函数
-                executor.spin_some();  // 替代 ros::spinOnce()
-
                 // 等待一段时间
-                rate.sleep();
+                std::this_thread::sleep_for(std::chrono::seconds(1));
             }
         }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
