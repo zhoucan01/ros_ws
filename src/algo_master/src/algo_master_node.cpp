@@ -1,4 +1,4 @@
-
+﻿
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include "algo_master/constants.hpp"
@@ -64,7 +64,7 @@ public:
         cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
             "cmd_vel", 10,
             [this](const geometry_msgs::msg::Twist::SharedPtr msg) {
-                static u_int8_t buff_seq;
+                static uint8_t buff_seq;
                 buff_seq++;
 
                 float cur_x = 0.0f;
@@ -111,7 +111,6 @@ public:
         enemy_pos_pub_ = this->create_publisher<sentry_decision_msg::msg::EnemyPos>("enemy_msg",10);
         manual_pos_pub_ = this->create_publisher<sentry_decision_msg::msg::ManualPos>("manual_pos_msg", 10);
         cur_pos_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("current_pos_msg",10);
-        wheel_raw_pub_ = this->create_publisher<algo_master::msg::WheelRaw>("wheel_raw", 10);
         arrived_pub_ = this->create_publisher<std_msgs::msg::Bool>("if_arrived", 10);
         wheel_odom_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/wheel_odom", 10);
 
@@ -555,7 +554,6 @@ private:
   rclcpp::Publisher<algo_master::msg::WheelRaw>::SharedPtr wheel_raw_pub_;
 
     // cur_pos_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("current_pos_msg",10);
-        wheel_raw_pub_ = this->create_publisher<algo_master::msg::WheelRaw>("wheel_raw", 10);
     rclcpp::Subscription<algo_master::msg::PLC2Imu>::SharedPtr imu_sub_;
     rclcpp::Subscription<algo_master::msg::PLC2Target>::SharedPtr plc2target_sub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr nav_goal_pub_;

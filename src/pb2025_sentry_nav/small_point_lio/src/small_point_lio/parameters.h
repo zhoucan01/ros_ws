@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <small_point_lio/pch.h>
+#include <pch.h>
 
 namespace small_point_lio {
 
@@ -45,7 +45,14 @@ namespace small_point_lio {
 
         bool publish_odometry_without_downsample = false;
 
-        void read_parameters(const YAML::Node &node);
+        // 轮速观测
+        bool enable_wheel_fusion{false};
+        bool wheel_mask_angular{true};        // true = 屏蔽轮速对角速度的更新（论文推荐）
+        double wheel_meas_vel_cov{0.1};       // 轮速线速度测量协方差 R (vel部分)
+        double wheel_meas_omg_cov{10.0};      // 轮速角速度测量协方差 R (omg部分)
+        double wheel_residual_rms_scale{1.0}; // RMS残差缩放因子 k
+
+        void read_parameters(rclcpp::Node &node);
     };
 
 }// namespace small_point_lio

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * This file is part of Small Point-LIO, an advanced Point-LIO algorithm implementation.
  * Copyright (C) 2025  Yingjie Huang
  * Licensed under the MIT License. See License.txt in the project root for license information.
@@ -17,6 +17,9 @@ namespace small_point_lio {
                 },
                 [this](auto &&s, auto &&measurement_result) {
                     return h_imu(s, measurement_result);
+                },
+                [this](auto &&s, auto &&measurement_result) {
+                    return h_wheel(s, measurement_result);
                 });
     }
 
@@ -127,4 +130,22 @@ namespace small_point_lio {
         }
     }
 
+
+    void Estimator::h_wheel(const state &s, wheel_measurement_result &measurement_result) {
+        for (int i = 0; i < 3; i++) {
+            measurement_result.mask_angular[i] = parameters->wheel_mask_angular;
+        }
+        measurement_result.z.segment<3>(0) = wheel_angular_velocity - s.omg - s.bg;
+        measurement_result.wheel_meas_omg_cov = static_cast<state::value_type>(parameters->wheel_meas_omg_cov);
+        Eigen::Matrix<state::value_type, 3, 1> v_wheel_world = s.rotation * wheel_linear_velocity;
+        measurement_result.z.segment<3>(3) = v_wheel_world - s.velocity - s.ba;
+        measurement_result.wheel_meas_vel_cov = static_cast<state::value_type>(parameters->wheel_meas_vel_cov);
+        if (parameters->wheel_residual_rms_scale > 0.0 && wheel_rms > 0.0) {
+            state::value_type scale = static_cast<state::value_type>(1.0 + parameters->wheel_residual_rms_scale * wheel_rms);
+            measurement_result.wheel_meas_vel_cov *= scale;
+        }
+        for (int i = 0; i < 3; i++) {
+            measurement_result.mask_linear[i] = false;
+        }
+    }
 }// namespace small_point_lio

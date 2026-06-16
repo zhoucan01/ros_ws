@@ -1,4 +1,4 @@
-/**
+﻿/**
  * This file is part of Small Point-LIO, an advanced Point-LIO algorithm implementation.
  * Copyright (C) 2025  Yingjie Huang
  * Licensed under the MIT License. See License.txt in the project root for license information.
@@ -10,7 +10,8 @@
 #include "estimator.h"
 #include "parameters.h"
 #include "preprocess.h"
-#include <small_point_lio/pch.h>
+#include <deque>
+#include <pch.h>
 
 namespace small_point_lio {
 
@@ -24,18 +25,20 @@ namespace small_point_lio {
         std::function<void(const std::vector<Eigen::Vector3f> &pointcloud)> pointcloud_callback;
         std::function<void(const common::Odometry &odometry)> odometry_callback;
         bool is_init = false;
+        std::deque<common::WheelMsg> wheel_deque;
 
     public:
         Eigen::Matrix<state::value_type, state::DIM, state::DIM> Q;
 
-        explicit SmallPointLio(const YAML::Node &node);
+        explicit SmallPointLio(rclcpp::Node &node);
 
         void reset();
 
         void on_point_cloud_callback(const std::vector<common::Point> &pointcloud);
 
         void on_imu_callback(const common::ImuMsg &imu_msg);
-        void on_wheel_callback(double vx, double vy);
+
+        void on_wheel_callback(const common::WheelMsg &wheel_msg);
 
         void handle_once();
 

@@ -1,4 +1,4 @@
-/**
+ï»¿/**
  * This file is part of Small Point-LIO, an advanced Point-LIO algorithm implementation.
  * Copyright (C) 2025  Yingjie Huang
  * Licensed under the MIT License. See License.txt in the project root for license information.
@@ -8,7 +8,7 @@
 
 namespace small_point_lio {
 
-    SmallPointLio::SmallPointLio(const YAML::Node &node) {
+    SmallPointLio::SmallPointLio(rclcpp::Node &node) {
         // init param
         parameters.read_parameters(node);
         preprocess.parameters = &parameters;
@@ -36,7 +36,17 @@ namespace small_point_lio {
         preprocess.on_point_cloud_callback(pointcloud);
     }
 
-    void SmallPointLio::on_imu_callback(const common::ImuMsg &imu_msg) {
+    
+    void SmallPointLio::on_wheel_callback(const common::WheelMsg &wheel_msg) {
+        if (!parameters.enable_wheel_fusion) {
+            return;
+        }
+        wheel_deque.push_back(wheel_msg);
+        if (wheel_deque.size() > 100) {
+            wheel_deque.pop_front();
+        }
+    }
+void SmallPointLio::on_imu_callback(const common::ImuMsg &imu_msg) {
         preprocess.on_imu_callback(imu_msg);
     }
 
@@ -143,6 +153,21 @@ namespace small_point_lio {
             }
         }
 
+        // wheel update: process buffered wheel measurements
+        if (parameters.enable_wheel_fusion && !wheel_deque.empty()) {
+            while (!wheel_deque.empty()) {
+                const auto &wheel_msg = wheel_deque.front();
+                if (wheel_msg.timestamp < time_current) {
+                    wheel_deque.pop_front();
+                    continue;
+                }
+                estimator.wheel_linear_velocity = wheel_msg.linear_velocity.cast<state::value_type>();
+                estimator.wheel_angular_velocity = wheel_msg.angular_velocity.cast<state::value_type>();
+                estimator.wheel_rms = wheel_msg.residual_rms;
+                estimator.kf.update_wheel();
+                wheel_deque.pop_front();
+            }
+        }
         if (is_publish_odometry) {
             if (!parameters.publish_odometry_without_downsample) {
                 publish_odometry(time_current);
@@ -177,32 +202,3 @@ namespace small_point_lio {
     }
 
 }// namespace small_point_lio
-
-void SmallPointLio::on_wheel_callback(double vx, double vy) {
-    auto &x = estimator.kf.x;
-    auto &P = estimator.kf.P;
-    /* Predict body-frame velocity: R^T * v */
-    Eigen::Vector3d v_body_pred = x.rotation.transpose() * x.velocity;
-    Eigen::Matrix<double, 2, 1> innov;
-    innov << vx - v_body_pred(0), vy - v_body_pred(1);
-    /* Chi-squared outlier rejection */
-    if (innov.norm() > 3.0) return;
-    /* Jacobian H(2x30): ¦Ä¦È(3-5), ¦Äv(12-14) */
-    Eigen::Matrix<double, 2, state::DIM> H;
-    H.setZero();
-    H.block<2,3>(0, 3)  = -(x.rotation.transpose() * skew(x.velocity)).topRows<2>();
-    H.block<2,3>(0, 12) =  x.rotation.transpose().topRows<2>();
-    Eigen::Matrix2d R_wheel = Eigen::Matrix2d::Identity() * 0.01;
-    auto S = H * P * H.transpose() + R_wheel;
-    auto K = P * H.transpose() * S.inverse();
-    Eigen::Matrix<double, state::DIM, 1> dx = K * innov;
-    /* State retraction (rotation via SO3 exp) */
-    x.position += dx.block<3,1>(state::position_index, 0);
-    x.rotation *= exp<state::value_type>(dx.block<3,1>(state::rotation_index, 0));
-    x.velocity += dx.block<3,1>(state::velocity_index, 0);
-    x.bg += dx.block<3,1>(state::bg_index, 0);
-    x.ba += dx.block<3,1>(state::ba_index, 0);
-    Eigen::Matrix<double, state::DIM, state::DIM> I;
-    I.setIdentity();
-    P = (I - K * H) * P;
-}

@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <small_point_lio/pch.h>
+#include <pch.h>
 
 namespace common {
 
@@ -27,6 +27,13 @@ namespace common {
     struct Point {
         double timestamp;        // Unit: s
         Eigen::Vector3f position;// Unit: m
+    };
+
+    struct WheelMsg {
+        double timestamp;                   // Unit: s
+        Eigen::Vector3d linear_velocity;    // Unit: m/s, in body frame
+        Eigen::Vector3d angular_velocity;   // Unit: rad/s, in IMU/body frame
+        double residual_rms{0.0};           // RMS residual from embedded observer, 0 = default
     };
 
 }// namespace common

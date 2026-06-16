@@ -1,4 +1,4 @@
-/**
+﻿/**
  * This file is part of Small Point-LIO, an advanced Point-LIO algorithm implementation.
  * Copyright (C) 2025  Yingjie Huang
  * Licensed under the MIT License. See License.txt in the project root for license information.
@@ -7,7 +7,7 @@
 #pragma once
 
 #include "so3_math.h"
-#include <small_point_lio/pch.h>
+#include <pch.h>
 
 namespace small_point_lio {
 
@@ -60,7 +60,15 @@ namespace small_point_lio {
         state::value_type laser_point_cov;
     };
 
-    struct imu_measurement_result {// NOLINT(cppcoreguidelines-pro-type-member-init)
+    struct wheel_measurement_result {// NOLINT(cppcoreguidelines-pro-type-member-init)
+        bool mask_angular[3]{};
+        bool mask_linear[3]{};
+        Eigen::Matrix<state::value_type, 6, 1> z;
+        state::value_type wheel_meas_omg_cov;
+        state::value_type wheel_meas_vel_cov;
+    };
+
+        struct imu_measurement_result
         bool satu_check[6];
         Eigen::Matrix<state::value_type, 6, 1> z;
         state::value_type imu_meas_omg_cov;
@@ -71,6 +79,7 @@ namespace small_point_lio {
     public:
         using measurement_model_point = std::function<void(const state &, point_measurement_result &)>;
         using measurement_model_imu = std::function<void(const state &, imu_measurement_result &)>;
+        using measurement_model_wheel = std::function<void(const state &, wheel_measurement_result &)>;
 
         state x;
         Eigen::Matrix<state::value_type, state::DIM, state::DIM> P;
@@ -80,13 +89,15 @@ namespace small_point_lio {
         double time_predict_cov_last = 0.0;
         measurement_model_point h_point;
         measurement_model_imu h_imu;
+        measurement_model_wheel h_wheel;
 
     public:
         eskf() = default;
 
-        inline void init(const measurement_model_point &h_point, const measurement_model_imu &h_imu) {
+        inline void init(const measurement_model_point &h_point, const measurement_model_imu &h_imu, const measurement_model_wheel &h_wheel_w = nullptr) {
             this->h_point = h_point;
             this->h_imu = h_imu;
+            this->h_wheel = h_wheel_w;
         }
 
         inline void init_timestamp(double timestamp) {
@@ -173,6 +184,40 @@ namespace small_point_lio {
             P -= K * HP;
             return true;
         }
+        inline bool update_wheel() {
+            if (!h_wheel) return false;
+            wheel_measurement_result m;
+            h_wheel(x, m);
+            Eigen::Matrix<state::value_type, state::DIM, 6> PHT = Eigen::Matrix<state::value_type, state::DIM, 6>::Zero();
+            Eigen::Matrix<state::value_type, 6, state::DIM> HP = Eigen::Matrix<state::value_type, 6, state::DIM>::Zero();
+            Eigen::Matrix<state::value_type, 6, 6> HPHT = Eigen::Matrix<state::value_type, 6, 6>::Zero();
+            Eigen::Matrix<state::value_type, 6, 1> z = m.z;
+            for (int i = 0; i < 3; i++) {
+                if (!m.mask_angular[i]) {
+                    PHT.col(i) = P.col(state::omg_index + i) + P.col(state::bg_index + i);
+                    HP.row(i) = P.row(state::omg_index + i) + P.row(state::bg_index + i);
+                }
+            }
+            for (int i = 0; i < 3; i++) {
+                if (!m.mask_linear[i]) {
+                    PHT.col(i + 3) = P.col(state::velocity_index + i) + P.col(state::ba_index + i);
+                    HP.row(i + 3) = P.row(state::velocity_index + i) + P.row(state::ba_index + i);
+                }
+            }
+            for (int i = 0; i < 3; i++) {
+                if (!m.mask_angular[i]) { HPHT.col(i) = HP.col(state::omg_index + i) + HP.col(state::bg_index + i); }
+                if (!m.mask_linear[i]) { HPHT.col(i + 3) = HP.col(state::velocity_index + i) + HP.col(state::ba_index + i); }
+                HPHT(i, i) += m.wheel_meas_omg_cov;
+                HPHT(i + 3, i + 3) += m.wheel_meas_vel_cov;
+            }
+            Eigen::LDLT<Eigen::Matrix<state::value_type, 6, 6>> ldlt(HPHT);
+            if (ldlt.info() != Eigen::Success) [[unlikely]] { return false; }
+            Eigen::Matrix<state::value_type, state::DIM, 6> K = PHT * ldlt.solve(Eigen::Matrix<state::value_type, 6, 6>::Identity());
+            x.plus(K * z);
+            P -= K * HP;
+            return true;
+        }
+
     };
 
 }// namespace small_point_lio

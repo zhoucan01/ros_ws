@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "circular_buffer.hpp"
 
@@ -76,6 +76,12 @@ struct NavSerialMsg
      int16_t vy_wheel;        // chassis vy * 10000 (mm/s)
      float   gimbal_yaw;      // gimbal yaw relative to chassis (rad)
 
+     /* Raw wheel speeds (encoder ticks or mm/s) */
+     int16_t wheel_vlf;        // left front
+     int16_t wheel_vlb;        // left back
+     int16_t wheel_vrb;        // right back
+     int16_t wheel_vrf;        // right front
+
 
 
     uint8_t m_FrameTail = 0xAA;
@@ -88,10 +94,10 @@ struct DecisionSerialMsg
 
     struct DecisionData
     {
-        u_int8_t Decision_data_1;
-        u_int8_t Decision_data_2;
-        u_int8_t Decision_data_3;
-        u_int8_t Decision_data_4;
+        uint8_t Decision_data_1;
+        uint8_t Decision_data_2;
+        uint8_t Decision_data_3;
+        uint8_t Decision_data_4;
         int16_t game_remain_time;
         uint8_t game_state;
     } Decision_Data;
