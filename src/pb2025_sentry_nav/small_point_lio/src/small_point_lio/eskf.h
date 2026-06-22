@@ -68,7 +68,7 @@ namespace small_point_lio {
         state::value_type wheel_meas_vel_cov;
     };
 
-        struct imu_measurement_result
+    struct imu_measurement_result {
         bool satu_check[6];
         Eigen::Matrix<state::value_type, 6, 1> z;
         state::value_type imu_meas_omg_cov;
@@ -185,7 +185,9 @@ namespace small_point_lio {
             return true;
         }
         inline bool update_wheel() {
-            if (!h_wheel) return false;
+            if (!h_wheel) {
+                return false;
+            }
             wheel_measurement_result m;
             h_wheel(x, m);
             Eigen::Matrix<state::value_type, state::DIM, 6> PHT = Eigen::Matrix<state::value_type, state::DIM, 6>::Zero();
@@ -200,18 +202,24 @@ namespace small_point_lio {
             }
             for (int i = 0; i < 3; i++) {
                 if (!m.mask_linear[i]) {
-                    PHT.col(i + 3) = P.col(state::velocity_index + i) + P.col(state::ba_index + i);
-                    HP.row(i + 3) = P.row(state::velocity_index + i) + P.row(state::ba_index + i);
+                    PHT.col(i + 3) = P.col(state::velocity_index + i);
+                    HP.row(i + 3) = P.row(state::velocity_index + i);
                 }
             }
             for (int i = 0; i < 3; i++) {
-                if (!m.mask_angular[i]) { HPHT.col(i) = HP.col(state::omg_index + i) + HP.col(state::bg_index + i); }
-                if (!m.mask_linear[i]) { HPHT.col(i + 3) = HP.col(state::velocity_index + i) + HP.col(state::ba_index + i); }
+                if (!m.mask_angular[i]) {
+                    HPHT.col(i) = HP.col(state::omg_index + i) + HP.col(state::bg_index + i);
+                }
+                if (!m.mask_linear[i]) {
+                    HPHT.col(i + 3) = HP.col(state::velocity_index + i);
+                }
                 HPHT(i, i) += m.wheel_meas_omg_cov;
                 HPHT(i + 3, i + 3) += m.wheel_meas_vel_cov;
             }
             Eigen::LDLT<Eigen::Matrix<state::value_type, 6, 6>> ldlt(HPHT);
-            if (ldlt.info() != Eigen::Success) [[unlikely]] { return false; }
+            if (ldlt.info() != Eigen::Success) [[unlikely]] {
+                return false;
+            }
             Eigen::Matrix<state::value_type, state::DIM, 6> K = PHT * ldlt.solve(Eigen::Matrix<state::value_type, 6, 6>::Identity());
             x.plus(K * z);
             P -= K * HP;

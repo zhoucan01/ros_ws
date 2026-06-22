@@ -61,6 +61,13 @@
         odometry:
             publish_odometry_without_downsample: False
 
+        wheel:
+            enable: True
+            meas_vel_cov: 1.0
+            meas_omg_cov: 10.0
+            chi2_threshold: 3.0
+            residual_rms_scale: 2.0
+
         publish:
             path_en: True                                   # False: close the path output
             scan_publish_en: True                           # False: close all the point cloud output

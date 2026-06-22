@@ -31,6 +31,8 @@ bool wheel_enable = false;
 double wheel_meas_vel_cov = 1.0;
 double wheel_meas_omg_cov = 10.0;
 double wheel_chi2_threshold = 3.0;
+double wheel_residual_rms_scale = 2.0;
+double latest_wheel_rms = 0.0;
 int lidar_type, pcd_save_interval;
 std::vector<double> gravity_init, gravity;
 bool runtime_pos_log, pcd_save_en, path_en, extrinsic_est_en = true;
@@ -202,6 +204,21 @@ void readParameters(std::shared_ptr<rclcpp::Node> & nh)
     nh->declare_parameter<bool>("odometry.publish_odometry_without_downsample", false);
     nh->get_parameter(
       "odometry.publish_odometry_without_downsample", publish_odometry_without_downsample);
+
+    nh->declare_parameter<bool>("wheel.enable", false);
+    nh->get_parameter("wheel.enable", wheel_enable);
+
+    nh->declare_parameter<double>("wheel.meas_vel_cov", 1.0);
+    nh->get_parameter("wheel.meas_vel_cov", wheel_meas_vel_cov);
+
+    nh->declare_parameter<double>("wheel.meas_omg_cov", 10.0);
+    nh->get_parameter("wheel.meas_omg_cov", wheel_meas_omg_cov);
+
+    nh->declare_parameter<double>("wheel.chi2_threshold", 3.0);
+    nh->get_parameter("wheel.chi2_threshold", wheel_chi2_threshold);
+
+    nh->declare_parameter<double>("wheel.residual_rms_scale", 2.0);
+    nh->get_parameter("wheel.residual_rms_scale", wheel_residual_rms_scale);
 
     nh->declare_parameter<bool>("publish.path_en", true);
     nh->get_parameter("publish.path_en", path_en);

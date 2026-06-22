@@ -4,6 +4,7 @@
 #include "algo_master/constants.hpp"
 #include "algo_master/serialport.hpp"
 #include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include "algo_master/msg/plc2_imu.hpp"
 #include "algo_master/msg/plc2_target.hpp"
 #include "algo_master/msg/wheel_raw.hpp"
@@ -14,6 +15,7 @@
 #include <nav_msgs/msg/odometry.hpp> // For subscribing to odometry
 #include <nav_msgs/msg/path.hpp> 
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/float64.hpp>
 
 #include <sentry_decision_msg/msg/attitude_switch.hpp>
 #include <sentry_decision_msg/msg/enemy_pos.hpp>
@@ -112,7 +114,9 @@ public:
         manual_pos_pub_ = this->create_publisher<sentry_decision_msg::msg::ManualPos>("manual_pos_msg", 10);
         cur_pos_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("current_pos_msg",10);
         arrived_pub_ = this->create_publisher<std_msgs::msg::Bool>("if_arrived", 10);
-        wheel_odom_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/wheel_odom", 10);
+        wheel_raw_pub_ = this->create_publisher<algo_master::msg::WheelRaw>("/wheel_raw", 10);
+        wheel_odom_pub_ = this->create_publisher<geometry_msgs::msg::TwistStamped>("/wheel_odom_transformed", 10);
+        wheel_rms_pub_ = this->create_publisher<std_msgs::msg::Float64>("/wheel_rms", 10);
 
         // è®¢é IMU æ°æ®å¹¶è½¬æ?        imu_sub_ = this->create_subscription<algo_master::msg::PLC2Imu>(
             "plc2imu", 10,
@@ -459,24 +463,35 @@ private:
                 enemy_pos_pub_->publish(PLCNavRecv2EnemyMsg(nav_serial_recv_, current_map_yaw));
 
 
-                /* Wheel odometry (already rotated to IMU frame by STM32) */
-                {
-                    geometry_msgs::msg::Twist twist_msg;
-                    twist_msg.linear.x = nav_serial_recv_.vx_wheel / 10000.0;
-                    twist_msg.linear.y = nav_serial_recv_.vy_wheel / 10000.0;
-                    twist_msg.linear.z = 0.0;
-                    twist_msg.angular.z = 0.0;
-                    wheel_odom_pub_->publish(twist_msg);
-                }
                 /* Publish raw wheel speeds + gimbal yaw */
                 {
                     algo_master::msg::WheelRaw raw_msg;
-                    raw_msg.vlf = nav_serial_recv_.wheel_vlf;
-                    raw_msg.vlb = nav_serial_recv_.wheel_vlb;
-                    raw_msg.vrb = nav_serial_recv_.wheel_vrb;
-                    raw_msg.vrf = nav_serial_recv_.wheel_vrf;
-                    raw_msg.gimbal_yaw = nav_serial_recv_.gimbal_yaw;
+                    raw_msg.vx_wheel = nav_serial_recv_.Wheel_Data.vx_wheel;
+                    raw_msg.vy_wheel = nav_serial_recv_.Wheel_Data.vy_wheel;
+                    raw_msg.gimbal_yaw = nav_serial_recv_.Wheel_Data.gimbal_yaw;
+                    raw_msg.wheel_rms = nav_serial_recv_.Wheel_Data.wheel_rms;
+                    raw_msg.wheel_status = nav_serial_recv_.Wheel_Data.wheel_status;
                     wheel_raw_pub_->publish(raw_msg);
+                }
+
+                {
+                    constexpr double kWheelSpeedScale = 1.0 / 1000.0;
+                    geometry_msgs::msg::TwistStamped wheel_msg;
+                    wheel_msg.header.stamp = this->now();
+                    wheel_msg.header.frame_id = "base_link";
+                    wheel_msg.twist.linear.x =
+                        static_cast<double>(nav_serial_recv_.Wheel_Data.vx_wheel) * kWheelSpeedScale;
+                    wheel_msg.twist.linear.y =
+                        static_cast<double>(nav_serial_recv_.Wheel_Data.vy_wheel) * kWheelSpeedScale;
+                    wheel_msg.twist.linear.z = 0.0;
+                    wheel_msg.twist.angular.x = 0.0;
+                    wheel_msg.twist.angular.y = 0.0;
+                    wheel_msg.twist.angular.z = 0.0;
+                    wheel_odom_pub_->publish(wheel_msg);
+
+                    std_msgs::msg::Float64 wheel_rms_msg;
+                    wheel_rms_msg.data = static_cast<double>(nav_serial_recv_.Wheel_Data.wheel_rms);
+                    wheel_rms_pub_->publish(wheel_rms_msg);
                 }
                 /* Publish gimbal joint state */
 
@@ -548,10 +563,11 @@ private:
     rclcpp::Publisher<sentry_decision_msg::msg::EnemyPos>::SharedPtr enemy_pos_pub_;
     rclcpp::Publisher<sentry_decision_msg::msg::ManualPos>::SharedPtr manual_pos_pub_;
     
-    rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr cur_pos_pub_;
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr arrived_pub_;
-  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr wheel_odom_pub_;
-  rclcpp::Publisher<algo_master::msg::WheelRaw>::SharedPtr wheel_raw_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr cur_pos_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr arrived_pub_;
+    rclcpp::Publisher<algo_master::msg::WheelRaw>::SharedPtr wheel_raw_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr wheel_odom_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr wheel_rms_pub_;
 
     // cur_pos_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("current_pos_msg",10);
     rclcpp::Subscription<algo_master::msg::PLC2Imu>::SharedPtr imu_sub_;

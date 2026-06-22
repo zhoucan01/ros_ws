@@ -16,9 +16,10 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/subscription.hpp>
 #include <sensor_msgs/msg/imu.hpp>
-#include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_srvs/srv/trigger.hpp>
+#include <std_msgs/msg/float64.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_broadcaster.hpp>
 #include <tf2_ros/transform_listener.h>
@@ -31,7 +32,9 @@ namespace small_point_lio {
         std::vector<common::Point> pointcloud;
         std::unique_ptr<LidarAdapterBase> lidar_adapter;
         std::shared_ptr<rclcpp::Subscription<sensor_msgs::msg::Imu>> imu_subsciber;
-        std::shared_ptr<rclcpp::Subscription<geometry_msgs::msg::Twist>> wheel_subscriber_;
+        std::shared_ptr<rclcpp::Subscription<geometry_msgs::msg::TwistStamped>> wheel_subscriber_;
+        std::shared_ptr<rclcpp::Subscription<std_msgs::msg::Float64>> rms_subscriber_;
+        double latest_wheel_rms_{0.0};
         std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::Odometry>> odometry_publisher;
         std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::PointCloud2>> pointcloud_publisher;
         std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster;

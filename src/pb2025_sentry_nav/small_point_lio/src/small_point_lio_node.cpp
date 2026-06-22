@@ -11,8 +11,7 @@
 #include "lidar_adapter/livox_pointcloud2.h"
 #include "lidar_adapter/unitree_lidar.h"
 #include <geometry_msgs/msg/transform_stamped.hpp>
-#include <geometry_msgs/msg/twist.hpp>
-#include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 namespace small_point_lio {
@@ -196,19 +195,28 @@ namespace small_point_lio {
             rclcpp::shutdown();
             return;
         }
-                std::string wheel_topic = declare_parameter<std::string>("wheel_topic", "/wheel_odom_transformed");
-        wheel_subscriber_ = create_subscription<geometry_msgs::msg::Twist>(
+        std::string wheel_topic = declare_parameter<std::string>("wheel_topic", "/wheel_odom_transformed");
+        wheel_subscriber_ = create_subscription<geometry_msgs::msg::TwistStamped>(
             wheel_topic,
             rclcpp::QoS(10),
-            [this](const geometry_msgs::msg::Twist &msg) {
+            [this](const geometry_msgs::msg::TwistStamped &msg) {
                 common::WheelMsg wheel_msg;
-                wheel_msg.timestamp = this->now().seconds();
-                wheel_msg.linear_velocity = Eigen::Vector3d(msg.linear.x, msg.linear.y, 0.0);
-                wheel_msg.angular_velocity = Eigen::Vector3d(msg.angular.x, msg.angular.y, msg.angular.z);
+                wheel_msg.timestamp = rclcpp::Time(msg.header.stamp).seconds();
+                wheel_msg.linear_velocity = Eigen::Vector3d(msg.twist.linear.x, msg.twist.linear.y, 0.0);
+                wheel_msg.angular_velocity = Eigen::Vector3d(msg.twist.angular.x, msg.twist.angular.y, msg.twist.angular.z);
+                wheel_msg.residual_rms = latest_wheel_rms_;
                 small_point_lio->on_wheel_callback(wheel_msg);
             });
 
-        //  lidar adapter setup        lidar_adapter->setup_subscription(this, lidar_topic, [this](const std::vector<common::Point> &pointcloud) {
+        rms_subscriber_ = create_subscription<std_msgs::msg::Float64>(
+            "/wheel_rms",
+              rclcpp::QoS(10),
+              [this](const std_msgs::msg::Float64 &msg) {
+                  latest_wheel_rms_ = msg.data;
+              });
+
+        // lidar adapter setup
+        lidar_adapter->setup_subscription(this, lidar_topic, [this](const std::vector<common::Point> &pointcloud) {
             small_point_lio->on_point_cloud_callback(pointcloud);
             small_point_lio->handle_once();
         });

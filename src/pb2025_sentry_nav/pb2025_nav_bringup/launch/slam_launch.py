@@ -163,19 +163,6 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", log_level],
     )
 
-    start_wheel_observer_node = Node(
-        package="wheel_observer",
-        executable="wheel_observer_node",
-        name="wheel_observer",
-        condition=IfCondition(PythonExpression(['"', lio_type, '" == "small"'])),
-        output="screen",
-        parameters=[{"input_topic": "/wheel_odom",
-                     "output_topic": "/wheel_odom_transformed",
-                     "output_frame_id": "base_link",
-                     "enable_yaw_correction": False}],
-        arguments=["--ros-args", "--log-level", log_level],
-    )
-
     start_small_point_lio_node = Node(
         package="small_point_lio",
         executable="small_point_lio_node",
@@ -235,7 +222,6 @@ def generate_launch_description():
     ld.add_action(start_sync_slam_toolbox_node)
     ld.add_action(start_point_lio_node)
     ld.add_action(start_small_point_lio_node)
-    ld.add_action(start_wheel_observer_node)
     ld.add_action(start_static_transform_node)
 
     return ld

@@ -138,7 +138,7 @@ namespace small_point_lio {
         measurement_result.z.segment<3>(0) = wheel_angular_velocity - s.omg - s.bg;
         measurement_result.wheel_meas_omg_cov = static_cast<state::value_type>(parameters->wheel_meas_omg_cov);
         Eigen::Matrix<state::value_type, 3, 1> v_wheel_world = s.rotation * wheel_linear_velocity;
-        measurement_result.z.segment<3>(3) = v_wheel_world - s.velocity - s.ba;
+        measurement_result.z.segment<3>(3) = v_wheel_world - s.velocity;
         measurement_result.wheel_meas_vel_cov = static_cast<state::value_type>(parameters->wheel_meas_vel_cov);
         if (parameters->wheel_residual_rms_scale > 0.0 && wheel_rms > 0.0) {
             state::value_type scale = static_cast<state::value_type>(1.0 + parameters->wheel_residual_rms_scale * wheel_rms);

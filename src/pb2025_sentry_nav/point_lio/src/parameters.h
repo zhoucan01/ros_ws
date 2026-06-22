@@ -91,3 +91,5 @@ extern bool wheel_enable;
 extern double wheel_meas_vel_cov;
 extern double wheel_meas_omg_cov;
 extern double wheel_chi2_threshold;
+extern double wheel_residual_rms_scale;
+extern double latest_wheel_rms;

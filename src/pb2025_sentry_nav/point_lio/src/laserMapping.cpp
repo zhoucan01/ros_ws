@@ -6,11 +6,12 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <tf2_ros/transform_broadcaster.h>
- #include <tf2_ros/transform_listener.h>
- #include <geometry_msgs/msg/twist.hpp>
+#include <tf2_ros/transform_listener.h>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <std_msgs/msg/float64.hpp>
 
 #include "li_initialization.h"
 
@@ -314,7 +315,8 @@ int main(int argc, char ** argv)
   rclcpp::init(argc, argv);
   auto nh = std::make_shared<rclcpp::Node>("laserMapping");
 
-  rclcpp::executors::MultiThreadedExecutor executor;
+  // Keep callbacks serialized with the main mapping loop so wheel updates do not race the EKF.
+  rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(nh);
 
   readParameters(nh);
@@ -381,51 +383,90 @@ int main(int argc, char ** argv)
   auto sub_imu =
      nh->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS(), imu_cbk);
  
-     /* Wheel odometry: subscribes to /wheel_odom from algo_master (already in IMU frame) */
-     auto wheel_sub = nh->create_subscription<geometry_msgs::msg::Twist>(
-         "/wheel_odom_transformed", rclcpp::SensorDataQoS(),
-         [](const geometry_msgs::msg::Twist::SharedPtr msg) {
-             auto &x = kf_input.x_;
-             auto &P = kf_input.P_;
-             double vx = msg->linear.x, vy = msg->linear.y;
- 
-             /* Predict body-frame velocity from state */
-             Eigen::Matrix3d R(x.rot);
-             Eigen::Vector3d v_body_pred = R.transpose() * x.vel;
- 
-             /* Innovation */
-             Eigen::Matrix<double, 2, 1> innov;
-             innov << vx - v_body_pred(0), vy - v_body_pred(1);
- 
-             /* Chi-squared outlier: skip if wheel data is obviously wrong */
-             if (innov.norm() > 3.0) return;
- 
-             /* Jacobian H(2x24): only δθ(3-5) and δv(6-8) affect body-frame velocity */
-             Eigen::Matrix<double, 2, 24> H;
-             H.setZero();
-             H.block<2,3>(0, 3)  = -(R.transpose() * skew(x.vel)).topRows<2>();
-             H.block<2,3>(0, 6)  = R.transpose().topRows<2>();
- 
-             /* Measurement noise */
-             Eigen::Matrix2d R_wheel = Eigen::Matrix2d::Identity() * 0.01;
- 
-             /* EKF update */
-             auto S = H * P * H.transpose() + R_wheel;
-             auto K = P * H.transpose() * S.inverse();
-             Eigen::Matrix<double, 24, 1> dx = K * innov;
- 
-             /* Nominal state retraction (manifold) */
-             x.pos += dx.block<3,1>(0,0);
-             x.rot  = x.rot * SO3::exp(dx.block<3,1>(3,0));
-             x.vel += dx.block<3,1>(6,0);
-             x.bg  += dx.block<3,1>(9,0);
-             x.ba  += dx.block<3,1>(12,0);
- 
-             /* Covariance */
-             Eigen::Matrix<double, 24, 24> I; I.setIdentity();
-             P = (I - K * H) * P;
-         }
-     );
+  auto wheel_sub = nh->create_subscription<geometry_msgs::msg::TwistStamped>(
+    "/wheel_odom_transformed", rclcpp::SensorDataQoS(),
+    [](const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
+      if (!wheel_enable) {
+        return;
+      }
+
+      const double vx = msg->twist.linear.x;
+      const double vy = msg->twist.linear.y;
+      double rms_scale = 1.0 + wheel_residual_rms_scale * latest_wheel_rms;
+      if (rms_scale < 1.0) {
+        rms_scale = 1.0;
+      }
+
+      if (use_imu_as_input) {
+        auto & x = kf_input.x_;
+        auto & P = kf_input.P_;
+        Eigen::Matrix3d R(x.rot);
+        Eigen::Vector3d v_pred = R.transpose() * x.vel;
+        Eigen::Matrix<double, 2, 1> innov;
+        innov << vx - v_pred(0), vy - v_pred(1);
+        if (innov.norm() > wheel_chi2_threshold) {
+          return;
+        }
+
+        Eigen::Matrix<double, 2, 24> H;
+        H.setZero();
+        H.block<2, 3>(0, 3) = -(R.transpose() * skew_sym_mat(x.vel)).topRows<2>();
+        H.block<2, 3>(0, 12) = R.transpose().topRows<2>();
+
+        Eigen::Matrix2d Rw = Eigen::Matrix2d::Identity() * wheel_meas_vel_cov * rms_scale;
+        auto S = H * P * H.transpose() + Rw;
+        auto K = P * H.transpose() * S.inverse();
+        auto dx = K * innov;
+        x.pos += dx.block<3, 1>(0, 0);
+        x.rot = x.rot * SO3::exp(dx.block<3, 1>(3, 0));
+        x.offset_R_L_I = x.offset_R_L_I * SO3::exp(dx.block<3, 1>(6, 0));
+        x.offset_T_L_I += dx.block<3, 1>(9, 0);
+        x.vel += dx.block<3, 1>(12, 0);
+        x.bg += dx.block<3, 1>(15, 0);
+        x.ba += dx.block<3, 1>(18, 0);
+        x.gravity += dx.block<3, 1>(21, 0);
+        Eigen::Matrix<double, 24, 24> I24;
+        I24.setIdentity();
+        P = (I24 - K * H) * P;
+      } else {
+        auto & x = kf_output.x_;
+        auto & P = kf_output.P_;
+        Eigen::Matrix3d R(x.rot);
+        Eigen::Vector3d wheel_body(vx, vy, 0.0);
+        Eigen::Vector3d vw = R * wheel_body;
+        Eigen::Vector3d innov = vw - x.vel;
+        if (innov.norm() > wheel_chi2_threshold) {
+          return;
+        }
+
+        Eigen::Matrix<double, 3, 30> H;
+        H.setZero();
+        H.block<3, 3>(0, 3) = -R * skew_sym_mat(wheel_body);
+        H.block<3, 3>(0, 12) = -Eigen::Matrix3d::Identity();
+
+        Eigen::Matrix3d Rw = Eigen::Matrix3d::Identity() * wheel_meas_vel_cov * rms_scale;
+        auto S = H * P * H.transpose() + Rw;
+        auto K = P * H.transpose() * S.inverse();
+        auto dx = K * innov;
+        x.pos += dx.block<3, 1>(0, 0);
+        x.rot = x.rot * SO3::exp(dx.block<3, 1>(3, 0));
+        x.offset_R_L_I = x.offset_R_L_I * SO3::exp(dx.block<3, 1>(6, 0));
+        x.offset_T_L_I += dx.block<3, 1>(9, 0);
+        x.vel += dx.block<3, 1>(12, 0);
+        x.omg += dx.block<3, 1>(15, 0);
+        x.acc += dx.block<3, 1>(18, 0);
+        x.gravity += dx.block<3, 1>(21, 0);
+        x.bg += dx.block<3, 1>(24, 0);
+        x.ba += dx.block<3, 1>(27, 0);
+        Eigen::Matrix<double, 30, 30> I30;
+        I30.setIdentity();
+        P = (I30 - K * H) * P;
+      }
+    });
+
+  auto rms_sub = nh->create_subscription<std_msgs::msg::Float64>(
+    "/wheel_rms", 10,
+    [](const std_msgs::msg::Float64::SharedPtr msg) { latest_wheel_rms = msg->data; });
   auto pub_laser_cloud_full_res =
     nh->create_publisher<sensor_msgs::msg::PointCloud2>("cloud_registered", 20);
   auto pub_laser_cloud_full_res_body =
