@@ -2,6 +2,7 @@
 
 #include "sentry_bt/topics2blackboard.hpp"
 #include <cmath>
+#include <limits>
 
 void BlackboardUpdater::ResetMatchDerivedState()
 {
@@ -153,6 +154,184 @@ bool BlackboardUpdater::judge_if_move_attitude_weakened() const
     return attitude_time_move_ > attitude_weaken_threshold_s_;
 }
 
+int BlackboardUpdater::calc_attitude_cooldown_remaining_s() const
+{
+    if (!has_real_attitude_seen_ || last_game_remain_time_seen_ < latest_game_remain_time_)
+    {
+        return 0;
+    }
+
+    const int elapsed =
+        static_cast<int>(last_attitude_change_game_remain_time_) - static_cast<int>(latest_game_remain_time_);
+    if (elapsed < 0)
+    {
+        return attitude_cooldown_s_;
+    }
+
+    return std::max(0, attitude_cooldown_s_ - elapsed);
+}
+
+BlackboardUpdater::PredictiveState BlackboardUpdater::BuildPredictiveState() const
+{
+    PredictiveState state;
+    state.need_attack = getBlackboardBool("if_need_to_attack");
+    state.arrived = getBlackboardBool("if_arrived");
+    state.target_far = judge_if_target_far();
+    state.recently_hurt = if_recently_hurt_;
+    state.hp_low = if_hp_less_100_;
+    state.need_home = force_stay_home_ || if_get_allow_17_ || if_hp_less_100_;
+    state.current_attitude = static_cast<int>(referee_raw_msg_.real_sentry_attitude_switch);
+    if (state.current_attitude < 1 || state.current_attitude > 3)
+    {
+        state.current_attitude = 3;
+    }
+    state.cooldown_remaining_s = calc_attitude_cooldown_remaining_s();
+    state.shoot_heat = current_shoot_heat_17mm_;
+    state.heat_limit = heat_limit_17mm_;
+    state.heat_cool_rate = heat_cool_rate_17mm_;
+    state.attack_time = attitude_time_attack_;
+    state.defense_time = attitude_time_defense_;
+    state.move_time = attitude_time_move_;
+    return state;
+}
+
+int BlackboardUpdater::calc_attitude_stage_score(int attitude, const PredictiveState &state) const
+{
+    int score = 0;
+    const int effective_cool_rate = attitude == 1 ? static_cast<int>(state.heat_cool_rate) : 0;
+    const int projected_net_heat = std::max(
+        0,
+        static_cast<int>(state.shoot_heat) - effective_cool_rate);
+    const bool near_heat_limit =
+        state.heat_limit > 0 &&
+        projected_net_heat >= static_cast<int>(state.heat_limit) * 8 / 10;
+    const bool over_heat_limit =
+        state.heat_limit > 0 && projected_net_heat >= static_cast<int>(state.heat_limit);
+
+    switch (attitude)
+    {
+    case 1:
+        score += state.need_attack ? attack_score_need_attack_ : 0;
+        score += state.arrived ? attack_score_arrived_ : 0;
+        score += state.recently_hurt ? -attack_score_recently_hurt_penalty_ : 0;
+        score += state.target_far ? -attack_score_far_penalty_ : attack_score_near_bonus_;
+        score += state.attack_time > attitude_weaken_threshold_s_ ? -attack_score_weakened_penalty_ : 0;
+        score += state.hp_low ? -defense_score_low_hp_ : 0;
+        score += state.need_home ? -move_score_go_home_bonus_ : 0;
+        score += over_heat_limit ? -attack_score_heat_risk_penalty_ * 2 : 0;
+        score += near_heat_limit ? -attack_score_heat_risk_penalty_ : 0;
+        break;
+
+    case 2:
+        score += state.recently_hurt ? defense_score_recently_hurt_ : 0;
+        score += state.hp_low ? defense_score_low_hp_ : 0;
+        score += state.target_far ? -defense_score_far_penalty_ : defense_score_near_bonus_;
+        score += state.defense_time > attitude_weaken_threshold_s_ ? -defense_score_weakened_penalty_ : 0;
+        score += state.need_attack ? attack_score_need_attack_ / 5 : 0;
+        score += over_heat_limit ? -defense_score_heat_risk_penalty_ * 2 : 0;
+        score += near_heat_limit ? -defense_score_heat_risk_penalty_ : 0;
+        break;
+
+    case 3:
+    default:
+        score += state.target_far ? move_score_target_far_ : 0;
+        score += state.arrived ? -move_score_arrived_penalty_ : move_score_not_arrived_bonus_;
+        score += state.recently_hurt ? -move_score_recently_hurt_penalty_ : 0;
+        score += state.move_time > attitude_weaken_threshold_s_ ? -move_score_weakened_penalty_ : 0;
+        score += state.need_home ? move_score_go_home_bonus_ : 0;
+        score += near_heat_limit ? move_score_heat_relief_bonus_ : 0;
+        score += over_heat_limit ? move_score_heat_relief_bonus_ * 2 : 0;
+        break;
+    }
+
+    if (attitude == state.current_attitude)
+    {
+        score += attitude_keep_current_bonus_;
+    }
+    else if (state.cooldown_remaining_s > 0)
+    {
+        score -= 1000;
+    }
+    else
+    {
+        score -= attitude_switch_penalty_;
+    }
+
+    return score;
+}
+
+BlackboardUpdater::PredictiveState BlackboardUpdater::simulate_attitude_step(
+    const PredictiveState &state, int action) const
+{
+    PredictiveState next = state;
+
+    if (action != next.current_attitude && next.cooldown_remaining_s == 0)
+    {
+        next.current_attitude = action;
+        next.cooldown_remaining_s = attitude_cooldown_s_;
+    }
+
+    const int step = std::max(1, attitude_prediction_step_s_);
+    next.cooldown_remaining_s = std::max(0, next.cooldown_remaining_s - step);
+
+    int predicted_heat = static_cast<int>(next.shoot_heat);
+    if (next.need_attack)
+    {
+        predicted_heat += step * 15;
+    }
+    if (next.current_attitude == 1)
+    {
+        predicted_heat -= static_cast<int>(next.heat_cool_rate) * step;
+    }
+    next.shoot_heat = static_cast<uint16_t>(std::max(0, predicted_heat));
+
+    switch (next.current_attitude)
+    {
+    case 1:
+        next.attack_time = static_cast<uint16_t>(next.attack_time + step);
+        break;
+
+    case 2:
+        next.defense_time = static_cast<uint16_t>(next.defense_time + step);
+        break;
+
+    case 3:
+    default:
+        next.move_time = static_cast<uint16_t>(next.move_time + step);
+        break;
+    }
+
+    return next;
+}
+
+int BlackboardUpdater::calc_attitude_rollout_score(const PredictiveState &state, int depth) const
+{
+    if (depth <= 0)
+    {
+        return 0;
+    }
+
+    int best_score = std::numeric_limits<int>::min();
+    for (int action = 1; action <= 3; ++action)
+    {
+        best_score = std::max(best_score, calc_attitude_rollout_score_for_action(state, action, depth));
+    }
+    return best_score;
+}
+
+int BlackboardUpdater::calc_attitude_rollout_score_for_action(
+    const PredictiveState &state, int action, int depth) const
+{
+    const int stage_score = calc_attitude_stage_score(action, state);
+    if (stage_score <= -1000)
+    {
+        return stage_score;
+    }
+
+    const PredictiveState next_state = simulate_attitude_step(state, action);
+    return stage_score + calc_attitude_rollout_score(next_state, depth - 1);
+}
+
 bool BlackboardUpdater::isAttackableArmorId(uint8_t armor_id) const
 {
     return std::find(
@@ -253,38 +432,34 @@ void BlackboardUpdater::UpdateAttitudeTimers()
         attitude_time_move_ += dt;
         break;
     }
+
+    if (!has_real_attitude_seen_)
+    {
+        has_real_attitude_seen_ = true;
+    }
+    else if (referee_raw_msg_.real_sentry_attitude_switch != last_real_sentry_attitude_switch_)
+    {
+        last_attitude_change_game_remain_time_ = latest_game_remain_time_;
+    }
     last_real_sentry_attitude_switch_ = referee_raw_msg_.real_sentry_attitude_switch;
 }
 
 int BlackboardUpdater::calc_attack_attitude_score() const
 {
-    int score = 0;
-    score += getBlackboardBool("if_need_to_attack") ? attack_score_need_attack_ : 0;
-    score += getBlackboardBool("if_arrived") ? attack_score_arrived_ : 0;
-    score += if_recently_hurt_ ? -attack_score_recently_hurt_penalty_ : 0;
-    score += judge_if_target_far() ? -attack_score_far_penalty_ : attack_score_near_bonus_;
-    score += judge_if_attack_attitude_weakened() ? -attack_score_weakened_penalty_ : 0;
-    return score;
+    return calc_attitude_rollout_score_for_action(
+        BuildPredictiveState(), 1, std::max(1, attitude_prediction_horizon_));
 }
 
 int BlackboardUpdater::calc_defense_attitude_score() const
 {
-    int score = 0;
-    score += if_recently_hurt_ ? defense_score_recently_hurt_ : 0;
-    score += if_hp_less_100_ ? defense_score_low_hp_ : 0;
-    score += judge_if_target_far() ? -defense_score_far_penalty_ : defense_score_near_bonus_;
-    score += judge_if_defense_attitude_weakened() ? -defense_score_weakened_penalty_ : 0;
-    return score;
+    return calc_attitude_rollout_score_for_action(
+        BuildPredictiveState(), 2, std::max(1, attitude_prediction_horizon_));
 }
 
 int BlackboardUpdater::calc_move_attitude_score() const
 {
-    int score = 0;
-    score += judge_if_target_far() ? move_score_target_far_ : 0;
-    score += getBlackboardBool("if_arrived") ? -move_score_arrived_penalty_ : move_score_not_arrived_bonus_;
-    score += if_recently_hurt_ ? -move_score_recently_hurt_penalty_ : 0;
-    score += judge_if_move_attitude_weakened() ? -move_score_weakened_penalty_ : 0;
-    return score;
+    return calc_attitude_rollout_score_for_action(
+        BuildPredictiveState(), 3, std::max(1, attitude_prediction_horizon_));
 }
 
 int BlackboardUpdater::select_desired_sentry_attitude() const
@@ -484,6 +659,9 @@ sentry_decision_msg::msg::HostDecision BlackboardUpdater::BuildHostDecisionMsg(b
     host_decision_msg.move_attitude_weakened = judge_if_move_attitude_weakened() ? 1 : 0;
     host_decision_msg.projectile_allowance_17mm =
         static_cast<uint16_t>(std::max(0, static_cast<int>(referee_raw_msg_.projectile_allowance_17mm)));
+    host_decision_msg.current_shoot_heat_17mm = current_shoot_heat_17mm_;
+    host_decision_msg.heat_limit_17mm = heat_limit_17mm_;
+    host_decision_msg.heat_cool_rate_17mm = heat_cool_rate_17mm_;
     host_decision_msg.attack_attitude_score = static_cast<int16_t>(attack_attitude_score_);
     host_decision_msg.defense_attitude_score = static_cast<int16_t>(defense_attitude_score_);
     host_decision_msg.move_attitude_score = static_cast<int16_t>(move_attitude_score_);
@@ -519,6 +697,9 @@ void BlackboardUpdater::ApplyRefereeRawToBlackboard(const sentry_decision_msg::m
     blackboard_->set("enemy_hero_x", static_cast<int>(msg.enemy_hero_x));
     blackboard_->set("enemy_hero_y", static_cast<int>(msg.enemy_hero_y));
     blackboard_->set("real_sentry_attitude_switch", static_cast<int>(msg.real_sentry_attitude_switch));
+    blackboard_->set("current_shoot_heat_17mm", static_cast<int>(msg.current_shoot_heat_17mm));
+    blackboard_->set("heat_limit_17mm", static_cast<int>(msg.heat_limit_17mm));
+    blackboard_->set("heat_cool_rate_17mm", static_cast<int>(msg.heat_cool_rate_17mm));
     blackboard_->set("remaining_energy_flags", static_cast<int>(msg.remaining_energy_flags));
     blackboard_->set("if_energy_below_15", judge_if_energy_below_15());
 }
@@ -607,6 +788,9 @@ void BlackboardUpdater::UpdateHostDecision()
     blackboard_->set("already_allowance_17", static_cast<int>(already_allowance_17_));
     blackboard_->set("available_allowance_17", static_cast<int>(available_allowance_17_));
     blackboard_->set("allowance_remain_time", static_cast<int>(remain_time_));
+    blackboard_->set("current_shoot_heat_17mm", static_cast<int>(current_shoot_heat_17mm_));
+    blackboard_->set("heat_limit_17mm", static_cast<int>(heat_limit_17mm_));
+    blackboard_->set("heat_cool_rate_17mm", static_cast<int>(heat_cool_rate_17mm_));
 
     host_decision_pub_->publish(host_decision_msg);
 }
@@ -674,11 +858,29 @@ BlackboardUpdater::BlackboardUpdater(BT::Blackboard::Ptr blackboard)
         "attitude.move.not_arrived_bonus", move_score_not_arrived_bonus_);
     move_score_recently_hurt_penalty_ = this->declare_parameter<int>(
         "attitude.move.recently_hurt_penalty", move_score_recently_hurt_penalty_);
+    move_score_go_home_bonus_ = this->declare_parameter<int>(
+        "attitude.move.go_home_bonus", move_score_go_home_bonus_);
     move_score_weakened_penalty_ = this->declare_parameter<int>(
         "attitude.move.weakened_penalty", move_score_weakened_penalty_);
+    attack_score_heat_risk_penalty_ = this->declare_parameter<int>(
+        "attitude.attack.heat_risk_penalty", attack_score_heat_risk_penalty_);
+    defense_score_heat_risk_penalty_ = this->declare_parameter<int>(
+        "attitude.defense.heat_risk_penalty", defense_score_heat_risk_penalty_);
+    move_score_heat_relief_bonus_ = this->declare_parameter<int>(
+        "attitude.move.heat_relief_bonus", move_score_heat_relief_bonus_);
 
     attitude_weaken_threshold_s_ = static_cast<uint16_t>(this->declare_parameter<int>(
         "attitude.weaken_threshold_s", attitude_weaken_threshold_s_));
+    attitude_prediction_horizon_ = this->declare_parameter<int>(
+        "attitude.prediction_horizon", attitude_prediction_horizon_);
+    attitude_prediction_step_s_ = this->declare_parameter<int>(
+        "attitude.prediction_step_s", attitude_prediction_step_s_);
+    attitude_switch_penalty_ = this->declare_parameter<int>(
+        "attitude.switch_penalty", attitude_switch_penalty_);
+    attitude_keep_current_bonus_ = this->declare_parameter<int>(
+        "attitude.keep_current_bonus", attitude_keep_current_bonus_);
+    attitude_cooldown_s_ = this->declare_parameter<int>(
+        "attitude.cooldown_s", attitude_cooldown_s_);
 
     host_decision_pub_ = this->create_publisher<sentry_decision_msg::msg::HostDecision>(
         "host_decision_msg", 10);
@@ -693,6 +895,9 @@ BlackboardUpdater::BlackboardUpdater(BT::Blackboard::Ptr blackboard)
         {
             referee_raw_msg_ = *msg;
             has_referee_raw_ = true;
+            current_shoot_heat_17mm_ = msg->current_shoot_heat_17mm;
+            heat_limit_17mm_ = msg->heat_limit_17mm;
+            heat_cool_rate_17mm_ = msg->heat_cool_rate_17mm;
             ApplyRefereeRawToBlackboard(*msg);
             latest_game_remain_time_ = msg->game_remain_time;
             latest_game_state_ = msg->game_state;

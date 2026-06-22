@@ -601,6 +601,9 @@ int main(int argc, char **argv)
     blackboard->set("if_get_manual_msg", false);
     blackboard->set("if_get_radar_msg", false);
     blackboard->set("projectile_allowance_17mm", 0);
+    blackboard->set("current_shoot_heat_17mm", 0);
+    blackboard->set("heat_limit_17mm", 0);
+    blackboard->set("heat_cool_rate_17mm", 0);
     blackboard->set("allow_to_get_17mm", 0);
     blackboard->set("already_allowance_17", 0);
     blackboard->set("available_allowance_17", 0);

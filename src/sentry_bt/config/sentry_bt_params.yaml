@@ -109,13 +109,22 @@
     attitude.attack.target_far_penalty: 20
     attitude.attack.target_near_bonus: 15
     attitude.attack.weakened_penalty: 60
+    attitude.attack.heat_risk_penalty: 40
     attitude.defense.recently_hurt: 20
     attitude.defense.low_hp: 10
     attitude.defense.target_far_penalty: 10
     attitude.defense.target_near_bonus: 5
     attitude.defense.weakened_penalty: 40
+    attitude.defense.heat_risk_penalty: 15
     attitude.move.target_far: 50
     attitude.move.arrived_penalty: 10
     attitude.move.not_arrived_bonus: 20
     attitude.move.recently_hurt_penalty: 5
+    attitude.move.go_home_bonus: 25
     attitude.move.weakened_penalty: 30
+    attitude.move.heat_relief_bonus: 20
+    attitude.prediction_horizon: 4
+    attitude.prediction_step_s: 1
+    attitude.switch_penalty: 12
+    attitude.keep_current_bonus: 3
+    attitude.cooldown_s: 5

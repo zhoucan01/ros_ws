@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "circular_buffer.hpp"
 
@@ -71,16 +71,14 @@ struct NavSerialMsg
          int16_t Enemy_y;
      } Enemy_Pos;
  
-     /* Wheel odometry + gimbal yaw (for transforming chassis → IMU frame) */
-     int16_t vx_wheel;        // chassis vx * 10000 (mm/s)
-     int16_t vy_wheel;        // chassis vy * 10000 (mm/s)
-     float   gimbal_yaw;      // gimbal yaw relative to chassis (rad)
-
-     /* Raw wheel speeds (encoder ticks or mm/s) */
-     int16_t wheel_vlf;        // left front
-     int16_t wheel_vlb;        // left back
-     int16_t wheel_vrb;        // right back
-     int16_t wheel_vrf;        // right front
+     /* Four raw wheel speeds + gimbal yaw */
+     struct WheelData {
+         int16_t vx_wheel;        // filtered chassis vx from KF (mm/s)
+         int16_t vy_wheel;        // filtered chassis vy from KF (mm/s)
+         float   gimbal_yaw;      // gimbal yaw = yaw_motor_pos - yaw_front_pos (rad)
+         float   wheel_rms;       // RMS residual for slip detection (paper Sec 3.4)
+         uint8_t wheel_status;    // 0=normal, 1=chassis power lost
+     } Wheel_Data;
 
 
 
@@ -113,6 +111,9 @@ struct DecisionSerialMsg
         int16_t enemy_hero_y{};
         uint8_t real_sentry_attitude_switch{};
         uint8_t remaining_energy_flags{};
+        uint16_t current_shoot_heat_17mm{};
+        uint16_t heat_limit_17mm{};
+        uint16_t heat_cool_rate_17mm{};
     } Referee_Raw_Data;
 
         struct Get_decision_Msg//决策端是否收到这些决策源的数据

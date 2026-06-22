@@ -4,6 +4,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <behaviortree_cpp/blackboard.h>
+#include <array>
 #include <sentry_decision_msg/msg/enemy_pos.hpp>
 #include <sentry_decision_msg/msg/host_decision.hpp>
 #include <sentry_decision_msg/msg/referee_raw.hpp>
@@ -20,6 +21,24 @@ public:
     explicit BlackboardUpdater(BT::Blackboard::Ptr blackboard);
 
 private:
+    struct PredictiveState
+    {
+        bool need_attack{false};
+        bool arrived{false};
+        bool target_far{true};
+        bool recently_hurt{false};
+        bool hp_low{false};
+        bool need_home{false};
+        int current_attitude{3};
+        int cooldown_remaining_s{0};
+        uint16_t shoot_heat{0};
+        uint16_t heat_limit{0};
+        uint16_t heat_cool_rate{0};
+        uint16_t attack_time{0};
+        uint16_t defense_time{0};
+        uint16_t move_time{0};
+    };
+
     void UpdateHostDecision();
     void ResetMatchDerivedState();
     void UpdateMatchLifecycle();
@@ -57,6 +76,12 @@ private:
     uint16_t calc_allow_to_get_17mm() const;
     uint16_t calc_available_allowance_17() const;
     uint8_t calc_remain_time() const;
+    PredictiveState BuildPredictiveState() const;
+    int calc_attitude_cooldown_remaining_s() const;
+    int calc_attitude_stage_score(int attitude, const PredictiveState &state) const;
+    int calc_attitude_rollout_score(const PredictiveState &state, int depth) const;
+    int calc_attitude_rollout_score_for_action(const PredictiveState &state, int action, int depth) const;
+    PredictiveState simulate_attitude_step(const PredictiveState &state, int action) const;
     int calc_attack_attitude_score() const;
     int calc_defense_attitude_score() const;
     int calc_move_attitude_score() const;
@@ -123,8 +148,17 @@ private:
     int move_score_arrived_penalty_{10};
     int move_score_not_arrived_bonus_{10};
     int move_score_recently_hurt_penalty_{10};
+    int move_score_go_home_bonus_{25};
     int move_score_weakened_penalty_{30};
+    int attack_score_heat_risk_penalty_{40};
+    int defense_score_heat_risk_penalty_{15};
+    int move_score_heat_relief_bonus_{20};
     uint16_t attitude_weaken_threshold_s_{180};
+    int attitude_prediction_horizon_{4};
+    int attitude_prediction_step_s_{1};
+    int attitude_switch_penalty_{12};
+    int attitude_keep_current_bonus_{3};
+    int attitude_cooldown_s_{5};
     double latest_target_x_{0.0};
     double latest_target_y_{0.0};
     bool has_latest_target_{false};
@@ -132,6 +166,8 @@ private:
     bool last_match_started_{false};
     uint16_t last_hurt_game_remain_time_{420};
     uint8_t last_real_sentry_attitude_switch_{3};
+    uint16_t last_attitude_change_game_remain_time_{420};
+    bool has_real_attitude_seen_{false};
     rclcpp::Time last_attitude_log_time_{0, 0, RCL_ROS_TIME};
     double enemy_pos_scale_{0.1};
     bool enemy_pos_is_delta_{true};
@@ -142,6 +178,9 @@ private:
     double init_target_y_{8.0};
     double home_target_x_{2.71};
     double home_target_y_{2.24};
+    uint16_t current_shoot_heat_17mm_{0};
+    uint16_t heat_limit_17mm_{0};
+    uint16_t heat_cool_rate_17mm_{0};
     uint8_t remaining_energy_flags_{0};
     int opening_outpost_force_time_s_{240};
     double manual_map_x_max_{28.0};

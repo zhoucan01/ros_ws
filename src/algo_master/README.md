@@ -108,11 +108,19 @@ Referee_Raw_Data
 - `uint16 my_base_hp`
 - `uint16 we_outpost_hp`
 - `uint16 enemy_outpost_hp`
-- `uint16 game_remain_time`
-- `uint8 game_state`
-- `uint8 real_sentry_attitude_switch`
 - `int16 enemy_hero_x`
 - `int16 enemy_hero_y`
+- `uint8 real_sentry_attitude_switch`
+- `uint8 remaining_energy_flags`
+- `uint16 current_shoot_heat_17mm`
+- `uint16 heat_limit_17mm`
+- `uint16 heat_cool_rate_17mm`
+
+注意：
+
+- `DecisionSerialMsg` 是按 `#pragma pack(push, 1)` 直接映射串口字节流的
+- 一旦这里增删字段，`sizeof(DecisionSerialMsg)` 会变化
+- 下位机发包结构体和长度必须同步更新，否则 `ProcRawBuf()` 会按错误长度切帧
 
 接收线程流程：
 

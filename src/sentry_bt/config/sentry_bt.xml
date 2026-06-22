@@ -61,7 +61,7 @@
             <ReactiveFallback>
               <Sequence>
                 <ScriptCondition code="if_need_to_attack == 1"/>
-                <ScriptCondition code="if_need_hp_recover == true"/>
+                <ScriptCondition code="if_need_hp_recover == false"/>
                 <AntiAutoAim
                     target_point_port="{target_point}"
                     costmap_port="{nav_globalCostmap}"

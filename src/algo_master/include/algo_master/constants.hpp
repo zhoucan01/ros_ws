@@ -177,6 +177,12 @@ sentry_decision_msg::msg::RefereeRaw PLCDecisionRecv2RefereeRawMsg(
         DecisionserialRecv.Referee_Raw_Data.real_sentry_attitude_switch;
     referee_raw.remaining_energy_flags =
         DecisionserialRecv.Referee_Raw_Data.remaining_energy_flags;
+    referee_raw.current_shoot_heat_17mm =
+        DecisionserialRecv.Referee_Raw_Data.current_shoot_heat_17mm;
+    referee_raw.heat_limit_17mm =
+        DecisionserialRecv.Referee_Raw_Data.heat_limit_17mm;
+    referee_raw.heat_cool_rate_17mm =
+        DecisionserialRecv.Referee_Raw_Data.heat_cool_rate_17mm;
     return referee_raw;
 }
 

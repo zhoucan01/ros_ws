@@ -22,6 +22,9 @@ uint8 attack_attitude_weakened
 uint8 defense_attitude_weakened
 uint8 move_attitude_weakened
 uint16 projectile_allowance_17mm
+uint16 current_shoot_heat_17mm
+uint16 heat_limit_17mm
+uint16 heat_cool_rate_17mm
 int16 attack_attitude_score
 int16 defense_attitude_score
 int16 move_attitude_score

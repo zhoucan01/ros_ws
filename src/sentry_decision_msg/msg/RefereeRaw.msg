@@ -11,3 +11,6 @@ int16 enemy_hero_x
 int16 enemy_hero_y
 uint8 real_sentry_attitude_switch
 uint8 remaining_energy_flags
+uint16 current_shoot_heat_17mm
+uint16 heat_limit_17mm
+uint16 heat_cool_rate_17mm
