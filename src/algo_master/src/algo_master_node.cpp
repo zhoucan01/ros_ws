@@ -117,6 +117,8 @@ public:
         wheel_raw_pub_ = this->create_publisher<algo_master::msg::WheelRaw>("/wheel_raw", 10);
         wheel_odom_pub_ = this->create_publisher<geometry_msgs::msg::TwistStamped>("/wheel_odom_transformed", 10);
         wheel_rms_pub_ = this->create_publisher<std_msgs::msg::Float64>("/wheel_rms", 10);
+        wheel_power_lost_pub_ = this->create_publisher<std_msgs::msg::Bool>(
+            "/wheel_power_lost", rclcpp::QoS(1).transient_local());
 
         // è®¢é IMU æ°æ®å¹¶è½¬æ?        imu_sub_ = this->create_subscription<algo_master::msg::PLC2Imu>(
             "plc2imu", 10,
@@ -475,19 +477,26 @@ private:
                 }
 
                 {
+                    const bool wheel_power_lost = nav_serial_recv_.Wheel_Data.wheel_status != 0;
+                    std_msgs::msg::Bool wheel_power_lost_msg;
+                    wheel_power_lost_msg.data = wheel_power_lost;
+                    wheel_power_lost_pub_->publish(wheel_power_lost_msg);
+
                     constexpr double kWheelSpeedScale = 1.0 / 1000.0;
-                    geometry_msgs::msg::TwistStamped wheel_msg;
-                    wheel_msg.header.stamp = this->now();
-                    wheel_msg.header.frame_id = "base_link";
-                    wheel_msg.twist.linear.x =
-                        static_cast<double>(nav_serial_recv_.Wheel_Data.vx_wheel) * kWheelSpeedScale;
-                    wheel_msg.twist.linear.y =
-                        static_cast<double>(nav_serial_recv_.Wheel_Data.vy_wheel) * kWheelSpeedScale;
-                    wheel_msg.twist.linear.z = 0.0;
-                    wheel_msg.twist.angular.x = 0.0;
-                    wheel_msg.twist.angular.y = 0.0;
-                    wheel_msg.twist.angular.z = 0.0;
-                    wheel_odom_pub_->publish(wheel_msg);
+                    if (!wheel_power_lost) {
+                        geometry_msgs::msg::TwistStamped wheel_msg;
+                        wheel_msg.header.stamp = this->now();
+                        wheel_msg.header.frame_id = "base_link";
+                        wheel_msg.twist.linear.x =
+                            static_cast<double>(nav_serial_recv_.Wheel_Data.vx_wheel) * kWheelSpeedScale;
+                        wheel_msg.twist.linear.y =
+                            static_cast<double>(nav_serial_recv_.Wheel_Data.vy_wheel) * kWheelSpeedScale;
+                        wheel_msg.twist.linear.z = 0.0;
+                        wheel_msg.twist.angular.x = 0.0;
+                        wheel_msg.twist.angular.y = 0.0;
+                        wheel_msg.twist.angular.z = 0.0;
+                        wheel_odom_pub_->publish(wheel_msg);
+                    }
 
                     std_msgs::msg::Float64 wheel_rms_msg;
                     wheel_rms_msg.data = static_cast<double>(nav_serial_recv_.Wheel_Data.wheel_rms);
@@ -568,6 +577,7 @@ private:
     rclcpp::Publisher<algo_master::msg::WheelRaw>::SharedPtr wheel_raw_pub_;
     rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr wheel_odom_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr wheel_rms_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr wheel_power_lost_pub_;
 
     // cur_pos_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("current_pos_msg",10);
     rclcpp::Subscription<algo_master::msg::PLC2Imu>::SharedPtr imu_sub_;

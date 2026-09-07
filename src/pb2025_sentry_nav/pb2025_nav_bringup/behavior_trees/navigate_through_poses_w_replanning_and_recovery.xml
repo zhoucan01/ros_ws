@@ -16,7 +16,7 @@
                                  robot_base_frame="gimbal_yaw_fake"/>
               <ComputePathThroughPoses goals="{goals}"
                                        path="{path}"
-                                       planner_id="GridBased"/>
+                                       planner_id="JpsMinco"/>
             </ReactiveSequence>
             <ClearEntireCostmap name="ClearGlobalCostmap-Context"
                                 service_name="global_costmap/clear_entirely_global_costmap"/>

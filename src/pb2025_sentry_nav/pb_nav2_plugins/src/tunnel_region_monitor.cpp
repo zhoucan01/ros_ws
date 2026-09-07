@@ -39,7 +39,8 @@ enum TunnelStatus
   APPROACHING = 2,
   IN_TUNNEL = 3,
   PASSED = 4,
-  RECOVERY_ACTIVE = 5
+  RECOVERY_ACTIVE = 5,
+  WAITING_FOR_REOPEN = 6
 };
 
 struct RectRegion
@@ -175,6 +176,8 @@ public:
       "tunnel_recovery_active_topic", "tunnel_recovery_active");
     tunnel_recovery_goal_topic_ =
       this->declare_parameter<std::string>("tunnel_recovery_goal_topic", "tunnel_recovery_goal");
+    tunnel_waiting_for_reopen_topic_ = this->declare_parameter<std::string>(
+      "tunnel_waiting_for_reopen_topic", "tunnel_waiting_for_reopen");
     tunnel_target_yaw_topic_ =
       this->declare_parameter<std::string>("tunnel_target_yaw_topic", "tunnel_target_yaw");
     current_map_yaw_topic_ =
@@ -279,6 +282,8 @@ public:
       tunnel_recovery_active_topic_, latched_qos);
     tunnel_recovery_goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
       tunnel_recovery_goal_topic_, latched_qos);
+    tunnel_waiting_for_reopen_pub_ = this->create_publisher<std_msgs::msg::Bool>(
+      tunnel_waiting_for_reopen_topic_, latched_qos);
     tunnel_target_yaw_pub_ =
       this->create_publisher<std_msgs::msg::Float64>(tunnel_target_yaw_topic_, latched_qos);
     current_map_yaw_pub_ =
@@ -741,12 +746,26 @@ private:
       in_tunnel_ = false;
       disable_spin_ = false;
       tunnel_recovery_active_ = false;
+      tunnel_waiting_for_reopen_ = false;
       tunnel_status_ = NORMAL;
       tunnel_target_yaw_ = current_map_yaw_;
       tunnel_yaw_error_ = 0.0;
       approach_from_exit_side_ = false;
       low_clearance_mode_ = false;
       return;
+    }
+
+    if (tunnel_waiting_for_reopen_) {
+      if (blocked_tunnel_id_ >= 0) {
+        tunnel_status_ = WAITING_FOR_REOPEN;
+        low_clearance_mode_ = false;
+        return;
+      }
+      tunnel_waiting_for_reopen_ = false;
+      recovery_tunnel_id_ = -1;
+      approach_tunnel_id_ = -1;
+      approach_from_exit_side_ = false;
+      RCLCPP_INFO(get_logger(), "Tunnel reopened; request a fresh path to the original goal");
     }
 
     target_tunnel_id_ = findTargetTunnelFromPlan();
@@ -787,6 +806,7 @@ private:
 
     if (!will_pass_tunnel_ && !in_tunnel_ && !tunnel_recovery_active_) {
       tunnel_recovery_active_ = false;
+      tunnel_waiting_for_reopen_ = false;
       recovery_tunnel_id_ = -1;
       approach_tunnel_id_ = -1;
       approach_from_exit_side_ = false;
@@ -798,6 +818,14 @@ private:
     if (tunnel_recovery_active_) {
       if (reachedRecoveryGoal()) {
         tunnel_recovery_active_ = false;
+        tunnel_waiting_for_reopen_ = blocked_tunnel_id_ >= 0;
+        if (tunnel_waiting_for_reopen_) {
+          tunnel_status_ = WAITING_FOR_REOPEN;
+          low_clearance_mode_ = false;
+          RCLCPP_INFO(
+            get_logger(), "Reached safe waiting point for blocked tunnel %d", recovery_tunnel_id_);
+          return;
+        }
         recovery_tunnel_id_ = -1;
         approach_tunnel_id_ = -1;
         approach_from_exit_side_ = false;
@@ -841,6 +869,7 @@ private:
         blockTunnel(active_tunnel_id);
       }
       tunnel_recovery_active_ = true;
+      tunnel_waiting_for_reopen_ = false;
       recovery_tunnel_id_ = active_tunnel_id;
       tunnel_recovery_goal_ = buildRecoveryGoal(active_tunnel_id);
       tunnel_status_ = RECOVERY_ACTIVE;
@@ -985,6 +1014,9 @@ private:
 
     bool_msg.data = tunnel_recovery_active_;
     tunnel_recovery_active_pub_->publish(bool_msg);
+
+    bool_msg.data = tunnel_waiting_for_reopen_;
+    tunnel_waiting_for_reopen_pub_->publish(bool_msg);
 
     bool_msg.data = low_clearance_mode_;
     low_clearance_mode_pub_->publish(bool_msg);
@@ -1209,6 +1241,7 @@ private:
   std::string disable_spin_topic_;
   std::string tunnel_recovery_active_topic_;
   std::string tunnel_recovery_goal_topic_;
+  std::string tunnel_waiting_for_reopen_topic_;
   std::string tunnel_target_yaw_topic_;
   std::string current_map_yaw_topic_;
   std::string tunnel_yaw_error_topic_;
@@ -1265,6 +1298,7 @@ private:
   bool tracking_in_tunnel_phase_;
   bool approach_progress_armed_;
   bool approach_from_exit_side_;
+  bool tunnel_waiting_for_reopen_{false};
   std::chrono::steady_clock::time_point blocked_until_{};
 
   std::vector<double> trigger_x_mins_;
@@ -1306,6 +1340,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr will_pass_tunnel_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr disable_spin_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr tunnel_recovery_active_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr tunnel_waiting_for_reopen_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr global_pose_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr tunnel_recovery_goal_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr global_point_pub_;

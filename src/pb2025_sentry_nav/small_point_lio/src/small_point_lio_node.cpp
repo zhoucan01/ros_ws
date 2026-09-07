@@ -215,6 +215,15 @@ namespace small_point_lio {
                   latest_wheel_rms_ = msg.data;
               });
 
+        const std::string wheel_power_lost_topic =
+            declare_parameter<std::string>("wheel_power_lost_topic", "/wheel_power_lost");
+        wheel_power_lost_subscriber_ = create_subscription<std_msgs::msg::Bool>(
+            wheel_power_lost_topic,
+            rclcpp::QoS(1).transient_local(),
+            [this](const std_msgs::msg::Bool &msg) {
+                small_point_lio->set_wheel_fusion_available(!msg.data);
+            });
+
         // lidar adapter setup
         lidar_adapter->setup_subscription(this, lidar_topic, [this](const std::vector<common::Point> &pointcloud) {
             small_point_lio->on_point_cloud_callback(pointcloud);

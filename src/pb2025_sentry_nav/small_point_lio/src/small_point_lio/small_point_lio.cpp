@@ -38,13 +38,23 @@ namespace small_point_lio {
 
     
     void SmallPointLio::on_wheel_callback(const common::WheelMsg &wheel_msg) {
-        if (!parameters.enable_wheel_fusion) {
+        std::lock_guard<std::mutex> lock(wheel_mutex);
+        if (!parameters.enable_wheel_fusion || !wheel_fusion_available) {
             return;
         }
         wheel_deque.push_back(wheel_msg);
         if (wheel_deque.size() > 100) {
             wheel_deque.pop_front();
         }
+    }
+
+    void SmallPointLio::set_wheel_fusion_available(bool available) {
+        std::lock_guard<std::mutex> lock(wheel_mutex);
+        if (wheel_fusion_available == available) {
+            return;
+        }
+        wheel_fusion_available = available;
+        wheel_deque.clear();
     }
 void SmallPointLio::on_imu_callback(const common::ImuMsg &imu_msg) {
         preprocess.on_imu_callback(imu_msg);
@@ -154,18 +164,21 @@ void SmallPointLio::on_imu_callback(const common::ImuMsg &imu_msg) {
         }
 
         // wheel update: process buffered wheel measurements
-        if (parameters.enable_wheel_fusion && !wheel_deque.empty()) {
-            while (!wheel_deque.empty()) {
-                const auto &wheel_msg = wheel_deque.front();
-                if (wheel_msg.timestamp < time_current) {
+        if (parameters.enable_wheel_fusion) {
+            std::lock_guard<std::mutex> lock(wheel_mutex);
+            if (wheel_fusion_available) {
+                while (!wheel_deque.empty()) {
+                    const auto &wheel_msg = wheel_deque.front();
+                    if (wheel_msg.timestamp < time_current) {
+                        wheel_deque.pop_front();
+                        continue;
+                    }
+                    estimator.wheel_linear_velocity = wheel_msg.linear_velocity.cast<state::value_type>();
+                    estimator.wheel_angular_velocity = wheel_msg.angular_velocity.cast<state::value_type>();
+                    estimator.wheel_rms = wheel_msg.residual_rms;
+                    estimator.kf.update_wheel();
                     wheel_deque.pop_front();
-                    continue;
                 }
-                estimator.wheel_linear_velocity = wheel_msg.linear_velocity.cast<state::value_type>();
-                estimator.wheel_angular_velocity = wheel_msg.angular_velocity.cast<state::value_type>();
-                estimator.wheel_rms = wheel_msg.residual_rms;
-                estimator.kf.update_wheel();
-                wheel_deque.pop_front();
             }
         }
         if (is_publish_odometry) {

@@ -11,6 +11,7 @@
 #include "parameters.h"
 #include "preprocess.h"
 #include <deque>
+#include <mutex>
 #include <pch.h>
 
 namespace small_point_lio {
@@ -26,6 +27,8 @@ namespace small_point_lio {
         std::function<void(const common::Odometry &odometry)> odometry_callback;
         bool is_init = false;
         std::deque<common::WheelMsg> wheel_deque;
+        std::mutex wheel_mutex;
+        bool wheel_fusion_available{true};
 
     public:
         Eigen::Matrix<state::value_type, state::DIM, state::DIM> Q;
@@ -39,6 +42,9 @@ namespace small_point_lio {
         void on_imu_callback(const common::ImuMsg &imu_msg);
 
         void on_wheel_callback(const common::WheelMsg &wheel_msg);
+
+        // Clears buffered observations when the chassis reports that its motors lost power.
+        void set_wheel_fusion_available(bool available);
 
         void handle_once();
 

@@ -329,6 +329,7 @@ bt_navigator:
       - nav2_is_battery_charging_condition_bt_node
       - pb_topic_bool_condition_bt_node
       - pb_select_pose_by_topic_bt_node
+      - pb_wait_for_tunnel_reopen_bt_node
 
 controller_server:
   ros__parameters:
@@ -467,7 +468,19 @@ planner_server:
   ros__parameters:
     use_sim_time: true
     expected_planner_frequency: 10.0
-    planner_plugins: ["GridBased"]
+    # JPS uses the global costmap, including the directional tunnel layer. Smac stays available
+    # for manual fallback while JpsMinco is selected by the navigation behavior trees.
+    planner_plugins: ["JpsMinco", "GridBased"]
+    JpsMinco:
+      plugin: "pb_nav2_planners/JpsMincoPlanner"
+      allow_unknown: true
+      lethal_cost: 253
+      cost_travel_multiplier: 2.0
+      max_iterations: 200000
+      minco_iterations: 80
+      minco_step_size: 0.25
+      jps_path_topic: jps_path
+      minco_path_topic: minco_path
     GridBased:
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
       tolerance: 0.5
@@ -584,6 +597,7 @@ tunnel_region_monitor:
     disable_spin_topic: disable_spin
     tunnel_recovery_active_topic: tunnel_recovery_active
     tunnel_recovery_goal_topic: tunnel_recovery_goal
+    tunnel_waiting_for_reopen_topic: tunnel_waiting_for_reopen
     tunnel_target_yaw_topic: tunnel_target_yaw
     current_map_yaw_topic: current_map_yaw
     tunnel_yaw_error_topic: tunnel_yaw_error
