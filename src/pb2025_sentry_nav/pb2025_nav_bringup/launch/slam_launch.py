@@ -203,6 +203,17 @@ def generate_launch_description():
         ],
     )
 
+    start_tf_pose_publisher = Node(
+        package="pb_nav2_plugins",
+        executable="tf_pose_publisher",
+        name="tf_pose_publisher",
+        output="screen",
+        respawn=use_respawn,
+        respawn_delay=2.0,
+        parameters=[configured_params, {"publish_map_to_odom": False}],
+        arguments=["--ros-args", "--log-level", log_level],
+    )
+
     ld = LaunchDescription()
 
     # Declare the launch options
@@ -223,5 +234,6 @@ def generate_launch_description():
     ld.add_action(start_point_lio_node)
     ld.add_action(start_small_point_lio_node)
     ld.add_action(start_static_transform_node)
+    ld.add_action(start_tf_pose_publisher)
 
     return ld

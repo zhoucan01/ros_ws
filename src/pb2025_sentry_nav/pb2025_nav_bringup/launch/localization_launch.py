@@ -18,7 +18,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, SetEnvironmentVariable
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import LoadComposableNodes, Node
 from launch_ros.descriptions import ComposableNode, ParameterFile
@@ -156,30 +156,16 @@ def generate_launch_description():
          arguments=["--ros-args", "--log-level", log_level],
      )
 
-    start_static_transform_node = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        name="static_transform_publisher_map2odom",
-        condition=IfCondition(PythonExpression(["not ", use_small_gicp])),
+    start_tf_pose_publisher = Node(
+        package="pb_nav2_plugins",
+        executable="tf_pose_publisher",
+        name="tf_pose_publisher",
+        condition=UnlessCondition(use_small_gicp),
         output="screen",
-        arguments=[
-            "--x",
-            "0.0",
-            "--y",
-            "0.0",
-            "--z",
-            "0.0",
-            "--roll",
-            "0.0",
-            "--pitch",
-            "0.0",
-            "--yaw",
-            "0.0",
-            "--frame-id",
-            "map",
-            "--child-frame-id",
-            "odom",
-        ],
+        respawn=use_respawn,
+        respawn_delay=2.0,
+        parameters=[configured_params],
+        arguments=["--ros-args", "--log-level", log_level],
     )
 
     load_nodes = GroupAction(
@@ -282,7 +268,7 @@ def generate_launch_description():
     # Add the actions to launch all of the localiztion nodes
     ld.add_action(start_point_lio_node)
     ld.add_action(start_small_point_lio_node)
-    ld.add_action(start_static_transform_node)
+    ld.add_action(start_tf_pose_publisher)
     ld.add_action(load_nodes)
     ld.add_action(load_composable_nodes)
     ld.add_action(load_small_gicp_composable_node)

@@ -165,6 +165,18 @@ small_gicp_relocalization:
     # The prior_pcd_file does not need to be specified since it going to be set by defaults in launch.
     # prior_pcd_file: ""
 
+tf_pose_publisher:
+  ros__parameters:
+    use_sim_time: False
+    global_frame: map
+    odom_frame: odom
+    robot_frame: gimbal_yaw_fake
+    pose_topic: state_estimate_pose
+    point_topic: state_estimate_point
+    initial_pose_topic: initialpose
+    publish_map_to_odom: True
+    publish_rate: 20.0
+
 pointcloud_to_laserscan:
   ros__parameters:
     use_sim_time: True
@@ -391,6 +403,66 @@ controller_server:
       visualize: true
       reset_always: false
       transform_tolerance: 0.1
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: true
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: map
+      robot_base_frame: gimbal_yaw_fake
+      robot_radius: 0.2
+      resolution: 0.05
+      plugins: ["static_layer", "intensity_voxel_layer", "tunnel_cost_layer", "inflation_layer"]
+      intensity_voxel_layer:
+        plugin: pb_nav2_costmap_2d::IntensityVoxelLayer
+        enabled: true
+        track_unknown_space: true
+        footprint_clearing_enabled: true
+        publish_voxel_map: false
+        combination_method: 1
+        mark_threshold: 0
+        origin_z: 0.0
+        unknown_threshold: 5
+        z_resolution: 0.05
+        z_voxels: 16
+        min_obstacle_height: 0.0
+        max_obstacle_height: 2.0
+        min_obstacle_intensity: 0.1
+        max_obstacle_intensity: 2.0
+        observation_sources: terrain_map_ext
+        terrain_map_ext:
+          data_type: PointCloud2
+          topic: <robot_namespace>/terrain_map_ext
+          min_obstacle_height: 0.0
+          max_obstacle_height: 2.0
+          obstacle_max_range: 10.0
+          obstacle_min_range: 0.2
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: True
+      tunnel_cost_layer:
+        plugin: "pb_nav2_costmap_2d::TunnelCostLayer"
+        blocked_tunnel_topic: blocked_tunnel_id
+        entry_to_exit_ids: [0, 2]
+        exit_to_entry_ids: []
+        corner_0_xs: [5.07, 8.63, 14.37, 9.45]
+        corner_0_ys: [-4.71, 5.99, 5.81, -5.58]
+        corner_1_xs: [4.90, 8.66, 14.43, 9.39]
+        corner_1_ys: [-6.69, 5.03, 4.04, -6.72]
+        corner_2_xs: [6.06, 14.11, 15.57, 12.04]
+        corner_2_ys: [-6.95, 5.03, 4.07, -6.54]
+        corner_3_xs: [6.09, 10.99, 15.42, 12.16]
+        corner_3_ys: [-4.83, 5.87, 5.90, -5.93]
+        entry_xs: [5.60, 8.75, 15.02, 9.36]
+        entry_ys: [-5.12, 5.46, 5.72, -6.31]
+        exit_xs: [5.60, 10.93, 14.99, 12.33]
+        exit_ys: [-6.66, 5.46, 4.27, -6.31]
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 4.0
+        inflation_radius: 0.7
+      always_send_full_costmap: False
 planner_server:
   ros__parameters:
     use_sim_time: true
@@ -516,6 +588,7 @@ tunnel_region_monitor:
     current_map_yaw_topic: current_map_yaw
     tunnel_yaw_error_topic: tunnel_yaw_error
     tunnel_markers_topic: tunnel_markers
+    blocked_tunnel_topic: blocked_tunnel_id
     tunnel_monitor_topic: tunnel_monitor
     low_clearance_mode_topic: low_clearance_mode
     enable_tunnel_mode: true
@@ -527,7 +600,9 @@ tunnel_region_monitor:
     min_path_points_in_region: 3
     publish_rate: 10.0
     transform_tolerance: 0.1
-    approach_stuck_timeout: 2.0
+    approach_stuck_timeout: 5.0
+    approach_alignment_tolerance: 0.35
+    blocked_tunnel_duration: 30.0
     tunnel_stuck_timeout: 1.5
     min_progress_distance: 0.15
     recovery_retreat_distance: 0.8
@@ -537,18 +612,26 @@ tunnel_region_monitor:
     normal_vehicle_height: 0.23
     low_clearance_vehicle_height: 0.20
     low_clearance_target_nodes: ["terrain_analysis", "terrain_analysis_ext"]
-    trigger_x_mins: [1.00, 5.60, 7.80, 10.20]
-    trigger_x_maxs: [2.30, 6.80, 8.90, 11.50]
-    trigger_y_mins: [3.20, 0.90, 6.00, 2.60]
-    trigger_y_maxs: [4.20, 2.10, 7.20, 3.70]
-    tunnel_x_mins: [1.20, 5.80, 8.00, 10.50]
-    tunnel_x_maxs: [2.10, 6.60, 8.70, 11.30]
-    tunnel_y_mins: [3.40, 1.10, 6.20, 2.80]
-    tunnel_y_maxs: [4.00, 1.90, 7.00, 3.50]
-    entry_xs: [1.20, 5.80, 8.00, 10.50]
-    entry_ys: [3.70, 1.50, 6.60, 3.15]
-    exit_xs: [2.10, 6.60, 8.70, 11.30]
-    exit_ys: [3.70, 1.50, 6.60, 3.15]
+    trigger_x_mins: [4.70, 8.43, 14.17, 9.19]
+    trigger_x_maxs: [6.29, 14.31, 15.77, 12.36]
+    trigger_y_mins: [-7.15, 4.83, 3.84, -6.92]
+    trigger_y_maxs: [-4.51, 6.19, 6.10, -5.38]
+    tunnel_x_mins: [4.90, 8.63, 14.37, 9.39]
+    tunnel_x_maxs: [6.09, 14.11, 15.57, 12.16]
+    tunnel_y_mins: [-6.95, 5.03, 4.04, -6.72]
+    tunnel_y_maxs: [-4.71, 5.99, 5.90, -5.58]
+    entry_xs: [5.60, 8.75, 15.02, 9.36]
+    entry_ys: [-5.12, 5.46, 5.72, -6.31]
+    exit_xs: [5.60, 10.93, 14.99, 12.33]
+    exit_ys: [-6.66, 5.46, 4.27, -6.31]
+    corner_0_xs: [5.07, 8.63, 14.37, 9.45]
+    corner_0_ys: [-4.71, 5.99, 5.81, -5.58]
+    corner_1_xs: [4.90, 8.66, 14.43, 9.39]
+    corner_1_ys: [-6.69, 5.03, 4.04, -6.72]
+    corner_2_xs: [6.06, 14.11, 15.57, 12.04]
+    corner_2_ys: [-6.95, 5.03, 4.07, -6.54]
+    corner_3_xs: [6.09, 10.99, 15.42, 12.16]
+    corner_3_ys: [-4.83, 5.87, 5.90, -5.93]
 
 pb_teleop_twist_joy_node:
   ros__parameters:

@@ -38,6 +38,10 @@ ament_auto_add_executable(tunnel_region_monitor
   src/tunnel_region_monitor.cpp
 )
 
+ament_auto_add_executable(tf_pose_publisher
+  src/tf_pose_publisher.cpp
+)
+
 if(BUILD_TESTING)
 set(ament_cmake_clang_format_CONFIG_FILE "${CMAKE_SOURCE_DIR}/.clang-format")
 find_package(ament_lint_auto REQUIRED)
@@ -49,8 +53,6 @@ find_package(ament_lint_auto REQUIRED)
 endif()
 
 pluginlib_export_plugin_description_file(nav2_core behavior_plugin.xml)
-ament_auto_add_executable(tunnel_strategy_node src/tunnel_strategy_node.cpp)
-target_link_libraries(tunnel_strategy_node ${dependencies})
 pluginlib_export_plugin_description_file(nav2_costmap_2d costmap_plugins.xml)
 ament_auto_add_executable(tunnel_strategy_node src/tunnel_strategy_node.cpp)
 target_link_libraries(tunnel_strategy_node ${dependencies})
