@@ -70,6 +70,9 @@ private:
     bool judge_if_force_stay_home() const;
     bool getBlackboardBool(const std::string &key, bool fallback = false) const;
     int getBlackboardInt(const std::string &key, int fallback = 0) const;
+    // 丢目标滞回：只要最后一次"看到可攻击目标"在 target_lost_timeout_s_ 内，
+    // 就保持 if_need_to_attack（继续用最后已知敌人位置追击），超时才置 false。
+    void update_attack_intent();
     double calc_distance_to_home_depot() const;
     double calc_distance_to_target() const;
     void refresh_target_state();
@@ -174,6 +177,10 @@ private:
     double target_far_threshold_{1.5};
     double allowance_return_speed_{1.0};
     double allowance_return_buffer_s_{3.0};
+    // 丢目标滞回：最后一次成功看到可攻击目标的时间
+    rclcpp::Time last_valid_enemy_time_{0, 0, RCL_ROS_TIME};
+    bool has_valid_enemy_{false};
+    double target_lost_timeout_s_{3.0};
     double init_target_x_{3.76};
     double init_target_y_{8.0};
     double home_target_x_{2.71};

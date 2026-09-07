@@ -238,6 +238,7 @@ public:
         return {
             BT::InputPort<int>("normal_target_point", "Normal target point id"),
             BT::InputPort<geometry_msgs::msg::PoseStamped>("manual_target_pose", "Manual target pose"),
+            BT::InputPort<bool>("manual_target_valid", "Manual target valid (current tick)"),
             BT::InputPort<geometry_msgs::msg::PoseStamped>("attack_target_pose", "Attack target pose"),
             BT::InputPort<bool>("attack_target_valid", "Attack target valid"),
             BT::OutputPort<int>("final_target_point", "Final target point id"),
@@ -253,13 +254,20 @@ public:
         }
 
         auto manual_pose_input = getInput<geometry_msgs::msg::PoseStamped>("manual_target_pose");
+        auto manual_valid_input = getInput<bool>("manual_target_valid");
         auto attack_pose_input = getInput<geometry_msgs::msg::PoseStamped>("attack_target_pose");
         auto attack_valid_input = getInput<bool>("attack_target_valid");
 
         setOutput("final_target_point", normal_point_input.value());
         setOutput("final_target_source", 1);
 
-        if (manual_pose_input)
+        // 手操仅在"当前这一拍仍有效"时才允许覆盖普通目标。
+        // 不能只凭 manual_target_pose 是否存在于黑板判断，否则手操结束后
+        // manual_target_result 残留会一直抢占仲裁结果。
+        const bool manual_allowed =
+            manual_pose_input && manual_valid_input && manual_valid_input.value();
+
+        if (manual_allowed)
         {
             setOutput("final_target_pose", manual_pose_input.value());
             setOutput("final_target_source", 2);
@@ -377,6 +385,7 @@ public:
                 plc2target.target_y);
         }
 
+        publishAllDecisionPointMarkers();
         publishTargetMarkers(final_point, final_source, plc2target, final_target_pose_input);
     
         target_pub_->publish(plc2target);
@@ -384,6 +393,103 @@ public:
     }
 
 private:
+    // 决策点短名（rviz 标签用，避免全名太长互相遮挡）
+    static const char *DecisionPointShortName(int point_id)
+    {
+        switch (static_cast<DecisionPoint>(point_id))
+        {
+        case INIT_PACK_POINT:      return "INIT";
+        case WE_DEPOT_POINT:       return "DEPOT";
+        case ENEMY_OUTPOST_POINT:  return "EN_OUTPOST";
+        case WE_OUTPOST_POINT:     return "WE_OUTPOST";
+        case ENEMY_FORTRESS_POINT: return "EN_FORT";
+        case MANUAL_POINT:         return "MANUAL";
+        case ENEMY_FLYING_POINT:   return "EN_FLY";
+        case WE_PROTECT_POINT:     return "WE_PROT";
+        default:                   return "?";
+        }
+    }
+
+    // 每个 BT 决策点的可视化颜色（按点语义区分，方便在 rviz 里一眼分辨）
+    static void decisionPointColor(int point_id, float &r, float &g, float &b)
+    {
+        switch (static_cast<DecisionPoint>(point_id))
+        {
+        case INIT_PACK_POINT:      r = 0.85f; g = 0.85f; b = 0.85f; break; // 白：出生/起始点
+        case WE_DEPOT_POINT:       r = 0.20f; g = 0.95f; b = 0.30f; break; // 绿：己方补给点(家)
+        case ENEMY_OUTPOST_POINT:  r = 1.00f; g = 0.25f; b = 0.20f; break; // 红：敌方前哨
+        case WE_OUTPOST_POINT:     r = 1.00f; g = 0.80f; b = 0.10f; break; // 黄：己方前哨
+        case ENEMY_FORTRESS_POINT: r = 0.90f; g = 0.20f; b = 0.60f; break; // 品红：敌方基地
+        case MANUAL_POINT:         r = 0.20f; g = 0.80f; b = 1.00f; break; // 青：手操目标
+        case ENEMY_FLYING_POINT:   r = 0.60f; g = 0.40f; b = 1.00f; break; // 紫：敌方飞坡
+        case WE_PROTECT_POINT:     r = 0.25f; g = 0.55f; b = 1.00f; break; // 蓝：保护点
+        default:                   r = 0.50f; g = 0.50f; b = 0.50f; break;
+        }
+    }
+
+    // 把全部 0..7 决策点都画出来（固定颜色小球+名字），便于观察决策链在选哪个点。
+    void publishAllDecisionPointMarkers()
+    {
+        if (!target_marker_pub_) {
+            return;
+        }
+
+        visualization_msgs::msg::MarkerArray markers;
+        markers.markers.reserve(point_coords.size() * 2);
+
+        for (const auto &item : point_coords)
+        {
+            const int point_id = static_cast<int>(item.first);
+            std::pair<float, float> coord;
+            if (!ResolveDecisionPoint(point_id, coord))
+            {
+                continue;
+            }
+            const auto relative_target = ToInitRelative(coord.first, coord.second);
+
+            float r, g, b;
+            decisionPointColor(point_id, r, g, b);
+
+            visualization_msgs::msg::Marker sphere;
+            sphere.header.frame_id = "map";
+            sphere.header.stamp = node_->now();
+            sphere.ns = "sentry_bt_decision_points";
+            sphere.id = point_id;
+            sphere.type = visualization_msgs::msg::Marker::SPHERE;
+            sphere.action = visualization_msgs::msg::Marker::ADD;
+            sphere.pose.position.x = relative_target.first;
+            sphere.pose.position.y = relative_target.second;
+            sphere.pose.position.z = 0.15;
+            sphere.pose.orientation.w = 1.0;
+            sphere.scale.x = 0.28;
+            sphere.scale.y = 0.28;
+            sphere.scale.z = 0.28;
+            sphere.color.r = r;
+            sphere.color.g = g;
+            sphere.color.b = b;
+            sphere.color.a = 0.9;
+            markers.markers.push_back(sphere);
+
+            visualization_msgs::msg::Marker text;
+            text.header = sphere.header;
+            text.ns = "sentry_bt_decision_points_label";
+            text.id = point_id;
+            text.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+            text.action = visualization_msgs::msg::Marker::ADD;
+            text.pose = sphere.pose;
+            text.pose.position.z += 0.6;
+            text.scale.z = 0.35;
+            text.color.a = 1.0;
+            text.color.r = 1.0;
+            text.color.g = 1.0;
+            text.color.b = 1.0;
+            text.text = "P" + std::to_string(point_id) + " " + DecisionPointShortName(point_id);
+            markers.markers.push_back(text);
+        }
+
+        target_marker_pub_->publish(markers);
+    }
+
     void publishTargetMarkers(
         int final_point,
         int final_source,

@@ -26,6 +26,16 @@ void BlackboardUpdater::ResetMatchDerivedState()
     has_seen_we_outpost_hp_ = false;
     last_we_outpost_hp_ = 0;
     last_hurt_game_remain_time_ = 420;
+    // 手操目标是"本场临时输入"，开赛/换场必须清掉，
+    // 否则上一场残留的 manual_target_pose/manual_target_result
+    // 会在本场继续抢占 SelectFinalTarget 的仲裁结果。
+    has_manual_target_ = false;
+    blackboard_->set("if_manual_target_valid", false);
+    blackboard_->set("manual_target_pose", geometry_msgs::msg::PoseStamped());
+    blackboard_->set("manual_target_result", geometry_msgs::msg::PoseStamped());
+    // 开赛/换场清掉上一场的敌人追踪状态，避免跨场残留追击意图。
+    has_valid_enemy_ = false;
+    blackboard_->set("if_need_to_attack", false);
     ResetAttitudeDerivedState();
 }
 
@@ -343,6 +353,22 @@ bool BlackboardUpdater::isAttackableArmorId(uint8_t armor_id) const
 bool BlackboardUpdater::judge_if_force_stay_home() const
 {
     return force_stay_home_;
+}
+
+void BlackboardUpdater::update_attack_intent()
+{
+    bool attack_intent = false;
+    if (has_valid_enemy_)
+    {
+        const double elapsed = (this->now() - last_valid_enemy_time_).seconds();
+        attack_intent = elapsed < target_lost_timeout_s_;
+        // 超时后清掉残留的有效标志，防止恢复后又立刻追击过期目标。
+        if (!attack_intent)
+        {
+            has_valid_enemy_ = false;
+        }
+    }
+    blackboard_->set("if_need_to_attack", attack_intent);
 }
 
 bool BlackboardUpdater::getBlackboardBool(const std::string &key, bool fallback) const
@@ -716,6 +742,7 @@ void BlackboardUpdater::UpdateHostDecision()
     if (!judge_if_match_started())
     {
         blackboard_->set("if_match_started", false);
+        blackboard_->set("if_need_to_attack", false);
         blackboard_->set("if_get_allow_17", false);
         blackboard_->set("if_allowance_less_50", false);
         blackboard_->set("if_allowance_less_100", false);
@@ -733,6 +760,9 @@ void BlackboardUpdater::UpdateHostDecision()
         blackboard_->set("attack_attitude_score", 0);
         blackboard_->set("defense_attitude_score", 0);
         blackboard_->set("move_attitude_score", 0);
+        // 未开赛阶段也保持手操有效性实时刷新，
+        // 防止上一场残留的手操目标在仲裁层继续抢占。
+        blackboard_->set("if_manual_target_valid", judge_if_manual_target_valid());
         RCLCPP_INFO_THROTTLE(
             this->get_logger(), *this->get_clock(), 1000,
             "attitude select idle: match_started=0 game_state=%u remain=%u real=%u desired=3",
@@ -756,6 +786,9 @@ void BlackboardUpdater::UpdateHostDecision()
     judge_if_hurt_state();
     judge_if_need_allow_17();
     UpdateStayHomeState();
+    // 决策周期内持续刷新追击意图：即使 enemy 消息停发，
+    // 丢目标超时也会按 target_lost_timeout_s_ 被清掉。
+    update_attack_intent();
     UpdateAttitudeDecision();
     last_game_remain_time_seen_ = latest_game_remain_time_;
 
@@ -808,6 +841,7 @@ BlackboardUpdater::BlackboardUpdater(BT::Blackboard::Ptr blackboard)
     target_far_threshold_ = this->declare_parameter<double>("target_far_threshold", target_far_threshold_);
     allowance_return_speed_ = this->declare_parameter<double>("allowance.return_speed", allowance_return_speed_);
     allowance_return_buffer_s_ = this->declare_parameter<double>("allowance.return_buffer_s", allowance_return_buffer_s_);
+    target_lost_timeout_s_ = this->declare_parameter<double>("target_lost_timeout_s", target_lost_timeout_s_);
     {
         const auto init_value = this->declare_parameter<std::vector<double>>(
             "points.0", {init_target_x_, init_target_y_});
@@ -930,9 +964,13 @@ BlackboardUpdater::BlackboardUpdater(BT::Blackboard::Ptr blackboard)
     auto costmap_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
     costmap_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
         "global_costmap/costmap", costmap_qos,
-        [blackboard](const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+        [this, blackboard](const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
         {
-            std::cout << "cost_map"<<std::endl;
+            RCLCPP_DEBUG_THROTTLE(
+                this->get_logger(), *this->get_clock(), 5000,
+                "costmap refreshed: %ux%u res=%.3f frame=%s",
+                msg->info.width, msg->info.height, msg->info.resolution,
+                msg->header.frame_id.c_str());
             blackboard->set("nav_globalCostmap", *msg);
         });
     enemypos_sub_ = this->create_subscription<sentry_decision_msg::msg::EnemyPos>(
@@ -944,34 +982,59 @@ BlackboardUpdater::BlackboardUpdater(BT::Blackboard::Ptr blackboard)
             const bool attackable = isAttackableArmorId(msg->armor_id);
             blackboard->set("enemy_armor_id", static_cast<int>(msg->armor_id));
             blackboard->set("if_attack_target_type_allowed", attackable);
-            blackboard->set("if_need_to_attack", msg->if_vision_on != 0 && attackable);
 
-            geometry_msgs::msg::PointStamped enemy_pos_point;
-            const double ex = static_cast<double>(msg->enemy_pos_x) * enemy_pos_scale_;
-            const double ey = static_cast<double>(msg->enemy_pos_y) * enemy_pos_scale_;
-
-            if (enemy_pos_is_delta_)
+            const bool vision_on = msg->if_vision_on != 0;
+            // 只在比赛开始时才算有效追击源：未开赛阶段(自检/热身)不积累追击意图，
+            // 避免 update_attack_intent() 与 UpdateHostDecision 未开赛分支互相拉锯。
+            if (vision_on && attackable && judge_if_match_started())
             {
-                if (!has_current_pos_)
+                // 看到可攻击目标：刷新"最后有效目标"时间，并更新目标位置。
+                // 丢目标后（if_vision_on==0）保持最后已知位置，供滞回窗口内继续追击。
+                last_valid_enemy_time_ = this->now();
+                has_valid_enemy_ = true;
+
+                geometry_msgs::msg::PointStamped enemy_pos_point;
+                const double ex = static_cast<double>(msg->enemy_pos_x) * enemy_pos_scale_;
+                const double ey = static_cast<double>(msg->enemy_pos_y) * enemy_pos_scale_;
+
+                if (enemy_pos_is_delta_)
                 {
-                    RCLCPP_WARN_THROTTLE(
-                        this->get_logger(), *this->get_clock(), 2000,
-                        "current_pos not ready, skip enemy delta projection");
-                    return;
+                    if (!has_current_pos_)
+                    {
+                        RCLCPP_WARN_THROTTLE(
+                            this->get_logger(), *this->get_clock(), 2000,
+                            "current_pos not ready, skip enemy delta projection");
+                        update_attack_intent();
+                        return;
+                    }
+                    enemy_pos_point.header = current_msg.header;
+                    enemy_pos_point.point.x = current_msg.point.x + ex;
+                    enemy_pos_point.point.y = current_msg.point.y + ey;
                 }
-                enemy_pos_point.header = current_msg.header;
-                enemy_pos_point.point.x = current_msg.point.x + ex;
-                enemy_pos_point.point.y = current_msg.point.y + ey;
+                else
+                {
+                    enemy_pos_point.header.stamp = this->now();
+                    enemy_pos_point.header.frame_id = "map";
+                    enemy_pos_point.point.x = ex;
+                    enemy_pos_point.point.y = ey;
+                }
+
+                blackboard->set("enemy_pos_point", enemy_pos_point);
+                update_attack_intent();
+            }
+            else if (judge_if_match_started())
+            {
+                // 比赛中但当前帧无有效目标（丢目标 / 视觉丢失 / 目标不可攻击）：
+                // 不清黑板 enemy_pos_point，交给滞回窗口判定——
+                // 最后一次看到目标在 target_lost_timeout_s_ 内则保持追击，
+                // 超时后由 update_attack_intent() 置 false。
+                update_attack_intent();
             }
             else
             {
-                enemy_pos_point.header.stamp = this->now();
-                enemy_pos_point.header.frame_id = "map";
-                enemy_pos_point.point.x = ex;
-                enemy_pos_point.point.y = ey;
+                // 未开赛（自检/热身）：立即关追击意图，防拉锯。
+                blackboard_->set("if_need_to_attack", false);
             }
-
-            blackboard->set("enemy_pos_point", enemy_pos_point);
         });
 
     tunnel_monitor_sub_ = this->create_subscription<sentry_decision_msg::msg::TunnelMonitor>(

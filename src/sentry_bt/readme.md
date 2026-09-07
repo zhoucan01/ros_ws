@@ -60,6 +60,19 @@
 
 方便你联调时核对两套坐标系。
 
+### 1.3 目标点可视化
+
+`PublishNavGoal` 每次 tick 都会往 rviz 发布一个 MarkerArray（默认话题 `sentry_bt_target_markers`），其中包含两部分：
+
+- **全部 0..7 决策点总览**：每个决策点一个小球（不同语义固定颜色）+ `P<id>` 文字标签
+  - ns = `sentry_bt_decision_points` / `sentry_bt_decision_points_label`
+  - 颜色含义：白=出生点、绿=己方补给点、红=敌方前哨、黄=己方前哨、品红=敌方基地、青=手操、紫=敌方飞坡、蓝=保护点
+- **当前最终选中的目标**：一个更大的高亮球 + `id=.. src=.. rel=(..)` 标签
+  - ns = `sentry_bt_target` / `sentry_bt_target_label`
+  - 颜色含义：绿=普通决策点、橙=手操目标、红=攻击/追击目标
+
+也就是说，决策树在选哪个点、最终实际发出去的是哪个点，在 rviz 里能一眼看出来。
+
 ## 2. 与过洞逻辑的关系
 
 `sentry_bt` 现在已经接入 `tunnel_region_monitor` 发布的聚合消息：
@@ -297,15 +310,15 @@ sentry_bt_node:
 
 在目标点决策完成后，还会进入“追击覆盖”阶段：
 
-- 如果 `if_need_to_attack == 1`
-- 并且 `if_need_hp_recover == true`
+- 如果 `if_need_to_attack == true`
+- 并且 `if_need_hp_recover == false`（血量健康、不需要回血时才追击）
 
 则会调用 `AntiAutoAim`，尝试生成一个攻击目标点 `final_attack_point`。
 
 当前这块已经拆成三层：
 
 1. 正常决策层
-   - 行为树优先级链先给出一个 `normal_target_point`
+   - 行为树优先级链先给出一个 `normal_target_point`（去哪个战略点，由决策层负责）
 
 2. 追击评估层
    - `AntiAutoAim` 输入：
@@ -327,6 +340,28 @@ sentry_bt_node:
 
 也就是说，现在最终发给导航的目标，不再由 `PublishNavGoal` 自己隐式判断，而是由 `SelectFinalTarget` 单独仲裁。
 
+### 5.1.2.0 追击必须贴着决策点，不追出防守范围
+
+追击候选点虽然还是"绕敌人一圈生成"，但 `AntiAutoAim` 内部会再用一道过滤：
+
+- 候选攻击点与**当前决策目标点**的距离必须 ≤ `anti_autoaim.decision_chase_radius`（默认 5.0 m）
+
+效果是：
+
+- 决策层决定"去哪个战略点守/打"，追击层只允许在这个点附近接敌
+- 敌人被引到远离决策点的位置 → 候选点全部落在半径外 → `attack_target_valid = false` → 放弃追击、回落决策点本身
+- 也就是说追击不会"敌人跑到哪就追到哪"，而是围着决策点转
+
+### 5.1.2.0b 丢目标不立即放弃：滞回追击
+
+视觉丢目标（`if_vision_on == 0`）后**不会立刻切回非追击**：
+
+- 最后一次成功看到可攻击目标后，追击意图保持 `target_lost_timeout_s`（默认 3.0 s）
+- 期间用**最后已知的敌人位置**继续生成追击点，往目标最后出现的位置赶
+- 超时仍未重新看到 → `if_need_to_attack` 置 false → 回落决策点/回家逻辑
+
+这样能避免目标在掩体后短暂消失几秒就立刻"切追击→切非追击"抖动。
+
 当前串口里发送的 `if_on_attack` 也是根据“最终仲裁结果是否真的用了攻击目标”来确定，而不是单纯看是否有追击意图。
 
 ### 5.1.2.1 当前“追击是否有输出”依赖链
@@ -335,10 +370,10 @@ sentry_bt_node:
 
 1. 入口是否允许追击
 
-- `if_need_to_attack == 1`
+- `if_need_to_attack == true`
   - 目前来自 `enemy_msg.if_vision_on`
-- `if_need_hp_recover == true`
-  - 目前来自上位机自己的血量判断
+- `if_need_hp_recover == false`
+  - 目前来自上位机自己的血量判断（需要回血时不追击）
 
 只有入口允许，行为树才会真正调用 `AntiAutoAim`。
 
@@ -376,11 +411,15 @@ sentry_bt_node:
 - 先围绕敌人生成一圈候选点
 - 用 `costmap` 过滤掉代价过高的点
 - 如果开了 `limit`，再过滤掉矩形外的点
-- 如果最后没有剩余候选点，则追击失败
+- 再过滤掉距当前决策点超过 `decision_chase_radius` 的点（默认 5.0 m，追不出防守范围）
+- 如果最后没有剩余候选点，则追击失败（回落决策点）
 
 所以当前追击是否有输出，可以概括为：
 
-`if_need_to_attack && if_need_hp_recover && policy.enable && 环境可行`
+`if_need_to_attack && !if_need_hp_recover && policy.enable && 决策点半径内 && 环境可行`
+
+其中 `if_need_to_attack` 带丢目标滞回：最后一次看到可攻击目标在 `target_lost_timeout_s`（默认 3.0 s）内
+即使当前帧没看到也保持 true（用最后已知敌人位置追击），超时才变 false。
 
 最终输出结果是：
 
@@ -396,9 +435,11 @@ sentry_bt_node:
 - `anti_autoaim.enable_attack`
 - `anti_autoaim.limit_chase_range`
 - `anti_autoaim.max_chase_distance`
+- `anti_autoaim.decision_chase_radius`（追击候选点距当前决策点的最大半径，默认 5.0）
 - `anti_autoaim.cost_threshold`
 - `anti_autoaim.distance_weight`
 - `anti_autoaim.cost_weight`
+- `target_lost_timeout_s`（丢目标滞回秒数，默认 3.0）
 
 以及每个普通目标点单独的策略参数：
 

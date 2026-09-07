@@ -36,8 +36,14 @@
     anti_autoaim.enable_attack: false
     anti_autoaim.limit_chase_range: false
     anti_autoaim.max_chase_distance: 3.0
+    # 追击候选点必须落在"当前决策目标点周围 decision_chase_radius 米"内。
+    # 决策层只负责选目标点，追击只能在决策点附近接敌；<=0 表示不限制。
+    anti_autoaim.decision_chase_radius: 5.0
     anti_autoaim.distance_weight: 0.6
     anti_autoaim.cost_weight: 0.4
+    # 丢目标滞回：最后一次看到可攻击目标后，保持追击意图 target_lost_timeout_s 秒
+    # （期间用最后已知敌人位置继续追击），超时仍未重新看到才切回非追击。
+    target_lost_timeout_s: 3.0
     anti_autoaim.policy.0.enable: true
     anti_autoaim.policy.0.limit: false
 

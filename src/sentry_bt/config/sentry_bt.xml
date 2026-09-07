@@ -60,7 +60,7 @@
           <Sequence>
             <ReactiveFallback>
               <Sequence>
-                <ScriptCondition code="if_need_to_attack == 1"/>
+                <ScriptCondition code="if_need_to_attack == true"/>
                 <ScriptCondition code="if_need_hp_recover == false"/>
                 <AntiAutoAim
                     target_point_port="{target_point}"
@@ -76,6 +76,7 @@
             <SelectFinalTarget
                 normal_target_point="{target_point}"
                 manual_target_pose="{manual_target_result}"
+                manual_target_valid="{if_manual_target_valid}"
                 attack_target_pose="{attack_target_pose}"
                 attack_target_valid="{attack_target_valid}"
                 final_target_point="{final_target_point}"
@@ -114,6 +115,7 @@
     <Action ID="SelectFinalTarget">
       <input_port name="normal_target_point" type="int">Normal target point</input_port>
       <input_port name="manual_target_pose" type="geometry_msgs::msg::PoseStamped">Manual target pose</input_port>
+      <input_port name="manual_target_valid" type="bool">Manual target valid this tick</input_port>
       <input_port name="attack_target_pose" type="geometry_msgs::msg::PoseStamped">Attack target pose</input_port>
       <input_port name="attack_target_valid" type="bool">Attack target valid</input_port>
       <output_port name="final_target_point" type="int">Final target point</output_port>

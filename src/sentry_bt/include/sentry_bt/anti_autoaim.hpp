@@ -69,6 +69,7 @@ private:
     bool enable_attack = true;
     bool limit_chase_range = false;
     double max_chase_distance = 3.0;
+    double decision_chase_radius = 5.0;  // 追击候选点距当前决策点的最大半径(m)；<=0 表示不限制
     double distance_weight = 0.6;
     double cost_weight = 0.4;
     // double marker_scale_base = 0.1;
@@ -80,6 +81,11 @@ private:
     bool limit = false;
   };
   std::unordered_map<std::string, Policy> policy_map_;
+
+  // 与 sentry_bt_node 的 points.* 全局坐标一致：经过 field mirror 后减去 map_origin，
+  // 得到 costmap/map 系的决策点坐标，供"追击候选点必须在决策点周围"过滤使用。
+  std::unordered_map<int, geometry_msgs::msg::Point> decision_points_;
+  void loadDecisionPointCoordinates();
 };
 // }
 
