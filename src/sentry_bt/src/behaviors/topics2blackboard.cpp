@@ -657,57 +657,6 @@ void BlackboardUpdater::judge_if_hurt_state()
     last_current_hp_ = current_hp;
 }
 
-sentry_decision_msg::msg::HostDecision BlackboardUpdater::BuildHostDecisionMsg(bool if_get_allow_17) const
-{
-    sentry_decision_msg::msg::HostDecision host_decision_msg;
-    host_decision_msg.if_match_started = judge_if_match_started() ? 1 : 0;
-    host_decision_msg.if_hp_less_50 = if_hp_less_50_ ? 1 : 0;
-    host_decision_msg.if_hp_less_100 = if_hp_less_100_ ? 1 : 0;
-    host_decision_msg.if_need_hp_recover = judge_if_need_hp_recover() ? 1 : 0;
-    host_decision_msg.if_get_allow_17 = if_get_allow_17 ? 1 : 0;
-    host_decision_msg.if_allowance_less_50 = judge_if_allowance_less_50() ? 1 : 0;
-    host_decision_msg.if_allowance_less_100 = judge_if_allowance_less_100() ? 1 : 0;
-    host_decision_msg.if_get_manual_msg = referee_raw_msg_.if_get_manual_msg;
-    host_decision_msg.if_manual_target_valid = judge_if_manual_target_valid() ? 1 : 0;
-    host_decision_msg.if_get_radar_msg = referee_raw_msg_.if_get_radar_msg;
-    host_decision_msg.if_enemy_outpost_alive = judge_if_enemy_outpost_alive() ? 1 : 0;
-    host_decision_msg.if_can_rebuild_outpost = judge_if_can_rebuild_outpost() ? 1 : 0;
-    host_decision_msg.if_base_full_hp = judge_if_base_full_hp() ? 1 : 0;
-    host_decision_msg.if_base_low_hp = judge_if_base_low_hp() ? 1 : 0;
-    host_decision_msg.if_recently_hurt = if_recently_hurt_ ? 1 : 0;
-    host_decision_msg.if_5s_not_hurted = if_5s_not_hurted_ ? 1 : 0;
-    host_decision_msg.if_target_far = judge_if_target_far() ? 1 : 0;
-    host_decision_msg.if_force_enemy_outpost = judge_if_force_enemy_outpost() ? 1 : 0;
-    host_decision_msg.real_sentry_attitude_switch = referee_raw_msg_.real_sentry_attitude_switch;
-    host_decision_msg.desired_sentry_attitude = static_cast<uint8_t>(desired_sentry_attitude_);
-    host_decision_msg.attack_attitude_weakened = judge_if_attack_attitude_weakened() ? 1 : 0;
-    host_decision_msg.defense_attitude_weakened = judge_if_defense_attitude_weakened() ? 1 : 0;
-    host_decision_msg.move_attitude_weakened = judge_if_move_attitude_weakened() ? 1 : 0;
-    host_decision_msg.projectile_allowance_17mm =
-        static_cast<uint16_t>(std::max(0, static_cast<int>(referee_raw_msg_.projectile_allowance_17mm)));
-    host_decision_msg.current_shoot_heat_17mm = current_shoot_heat_17mm_;
-    host_decision_msg.heat_limit_17mm = heat_limit_17mm_;
-    host_decision_msg.heat_cool_rate_17mm = heat_cool_rate_17mm_;
-    host_decision_msg.attack_attitude_score = static_cast<int16_t>(attack_attitude_score_);
-    host_decision_msg.defense_attitude_score = static_cast<int16_t>(defense_attitude_score_);
-    host_decision_msg.move_attitude_score = static_cast<int16_t>(move_attitude_score_);
-    host_decision_msg.current_hp = referee_raw_msg_.current_hp;
-    host_decision_msg.game_remain_time = latest_game_remain_time_;
-    host_decision_msg.my_base_hp = referee_raw_msg_.my_base_hp;
-    host_decision_msg.we_outpost_hp = referee_raw_msg_.we_outpost_hp;
-    host_decision_msg.enemy_outpost_hp = referee_raw_msg_.enemy_outpost_hp;
-    host_decision_msg.attack_attitude_time = attitude_time_attack_;
-    host_decision_msg.defense_attitude_time = attitude_time_defense_;
-    host_decision_msg.move_attitude_time = attitude_time_move_;
-    host_decision_msg.last_allowance_17 = last_allowance_17_;
-    host_decision_msg.allow_to_get_17mm = allow_to_get_17mm_;
-    host_decision_msg.already_allowance_17 = already_allowance_17_;
-    host_decision_msg.available_allowance_17 = available_allowance_17_;
-    host_decision_msg.remain_time = remain_time_;
-    host_decision_msg.manual_target_pose = manual_target_pose_;
-    return host_decision_msg;
-}
-
 void BlackboardUpdater::ApplyRefereeRawToBlackboard(const sentry_decision_msg::msg::RefereeRaw &msg)
 {
     blackboard_->set("referee_raw", msg);
@@ -792,8 +741,6 @@ void BlackboardUpdater::UpdateHostDecision()
     UpdateAttitudeDecision();
     last_game_remain_time_seen_ = latest_game_remain_time_;
 
-    const auto host_decision_msg = BuildHostDecisionMsg(if_get_allow_17_);
-
     blackboard_->set("if_match_started", judge_if_match_started());
     blackboard_->set("if_hp_less_50", if_hp_less_50_);
     blackboard_->set("if_hp_less_100", if_hp_less_100_);
@@ -824,8 +771,6 @@ void BlackboardUpdater::UpdateHostDecision()
     blackboard_->set("current_shoot_heat_17mm", static_cast<int>(current_shoot_heat_17mm_));
     blackboard_->set("heat_limit_17mm", static_cast<int>(heat_limit_17mm_));
     blackboard_->set("heat_cool_rate_17mm", static_cast<int>(heat_cool_rate_17mm_));
-
-    host_decision_pub_->publish(host_decision_msg);
 }
 
 BlackboardUpdater::BlackboardUpdater(BT::Blackboard::Ptr blackboard)
@@ -915,9 +860,6 @@ BlackboardUpdater::BlackboardUpdater(BT::Blackboard::Ptr blackboard)
         "attitude.keep_current_bonus", attitude_keep_current_bonus_);
     attitude_cooldown_s_ = this->declare_parameter<int>(
         "attitude.cooldown_s", attitude_cooldown_s_);
-
-    host_decision_pub_ = this->create_publisher<sentry_decision_msg::msg::HostDecision>(
-        "host_decision_msg", 10);
 
     decision_timer_ = this->create_wall_timer(
         std::chrono::milliseconds(100),

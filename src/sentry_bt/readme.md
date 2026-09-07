@@ -60,7 +60,7 @@
 
 方便你联调时核对两套坐标系。
 
-### 1.3 目标点可视化
+## 1.3 目标点可视化
 
 `PublishNavGoal` 每次 tick 都会往 rviz 发布一个 MarkerArray（默认话题 `sentry_bt_target_markers`），其中包含两部分：
 
@@ -182,7 +182,11 @@ sentry_bt_node:
 - 数据已经进黑板
 - 但行为树是否真的利用这些数据，还要看你后面要不要把 XML 规则补上
 
-## 5.1 当前 HostDecision / 黑板决策状态
+## 5.1 当前黑板决策状态
+
+> 说明：`HostDecision.msg` 发布链路（`host_decision_msg`）已删除——
+> 整仓没有任何节点订阅它，属于死代码。所有派生状态现在只写入行为树黑板，
+> 由 `sentry_bt.xml` 直接消费，不再额外发布一份消息。
 
 `BlackboardUpdater` 现在除了同步原始消息外，还会在上位机产出一批派生状态：
 
@@ -229,82 +233,74 @@ sentry_bt_node:
 
 当前目标点决策是在行为树 XML 中按优先级从上到下执行的，整体是一个 `if / else if` 风格的 `Fallback` 链。
 
-当前顺序如下：
+> ⚠️ 以下描述以 `config/sentry_bt.xml` 当前**实际生效**的代码为准。
+> 早期 readme 里的“雷达前哨 / 重建前哨 / 基地低血回防 / 剩余 120s 回防”等分支
+> 目前在 XML 中是**注释状态、不生效**，见 5.1.1.3。请不要再按旧描述排错。
 
-1. 如果比赛没有开始
+当前实际生效顺序如下：
+
+1. 比赛没有开始
    - 条件：`if_match_started == false`
-   - 目标点：`INIT_PACK_POINT`
+   - 目标点：`INIT_PACK_POINT`(0)
 
-2. 如果自己血量小于 100，或者需要回家补弹
+2. 需要回家（低血 / 补弹 / 回家锁定）
    - 条件：`if_hp_less_100 == true || if_get_allow_17 == true || if_force_stay_home == true`
-   - 目标点：`WE_DEPOT_POINT`
+   - 目标点：`WE_DEPOT_POINT`(1)
 
-这里当前还加了一条“回家锁定”逻辑：
+3. 云台手数据有效
+   - 条件：`if_get_manual_msg == true && if_manual_target_valid == true`
+   - 目标：直接使用手操 `manual_target_result`（不设普通点编号）
+
+4. 开局强制压前哨站
+   - 条件：`if_force_enemy_outpost == true`
+   - 目标点：`ENEMY_OUTPOST_POINT`(2)
+   - 时间窗由 `opening_outpost_force_time_s` 控制，默认 240，即比赛前 240 秒
+     （剩余时间 ≥ 420-240=180 秒），不是旧文档说的“前一分半/90 秒”。
+
+5. 兜底（以上都不满足）
+   - 无条件
+   - 目标点：`WE_PROTECT_POINT`(7)，作为巡逻/回防点使用
+
+也就是说，当前树的目标点逻辑不是做打分，而是严格优先级决策。
+
+### 5.1.1.1 回家锁定（`force_stay_home`）
+
+回家锁定由 `BlackboardUpdater::UpdateStayHomeState()` 维护，规则如下：
 
 - 一旦因为低血或补弹需求进入回家流程，`if_force_stay_home` 会被置为 `true`
-- 只要这个标志还在，就会持续把目标保持为 `WE_DEPOT_POINT`
-- 如果是因为补弹需求回家，则必须“到家 + 血量恢复 + 补弹需求解除”后，才允许重新出家
+- 只要这个标志还在，第 2 条就会持续命中，目标保持为 `WE_DEPOT_POINT`
+- 如果是因为补弹需求回家（`stay_home_for_ammo_`），则必须
+  “到家 + 血量恢复 + 补弹需求解除”后才允许重新出家
 - 如果只是因为回血回家，则只要“到家 + 回满血”就允许重新出家
 
-### 5.1.1.1 当前补弹时机判断
+### 5.1.1.2 补弹回家时机（动态时间阈值）
 
-补弹逻辑里现在不再把最后一条写成固定的 `remain_time < 5`，而是使用一个动态时间阈值。
-
-当前思路不是“怕赶不上补弹，所以早点回家”，而是：
+补弹逻辑里不再把最后一条写成固定的 `remain_time < 5`，而是使用动态时间阈值：
 
 - 当当前弹量已经非常低时
 - 结合当前位置到回家点的距离
 - 估算以当前速度回家大概需要多久
-- 让机器人尽量在一个“不早也不晚”的时机回家
-- 目标是刚好赶上下一波补弹时间窗口
+- 让机器人尽量在“不早也不晚”的时机回家，刚好赶上下一波补弹窗口
 
-也就是说，这条动态阈值更像是“卡补弹点回家”的时机判断，而不是简单的保守提前回家。
+也就是说，这条动态阈值更像“卡补弹点回家”，而不是保守提前回家。
 
-当前相关参数在：
+相关参数：
 
 - `allowance.return_speed`
 - `allowance.return_buffer_s`
 
-3. 如果云台手数据有效
-   - 条件：`if_get_manual_msg == true && if_manual_target_valid == true`
-   - 目标：直接使用 `manual_target_pose`
+### 5.1.1.3 已注释 / 未启用的备选分支
 
-4. 如果接收到雷达站数据，且敌方前哨站还有血量
-   - 条件：`if_radar_outpost_target == true`
-   - 目标点：`ENEMY_OUTPOST_POINT`
+以下分支在 `sentry_bt.xml` 里是注释状态，当前不参与决策，保留为备选策略模板：
 
-5. 如果比赛处于开局前一分半强制压前哨站时间窗口
-   - 条件：`if_force_enemy_outpost == true`
-   - 目标点：`ENEMY_OUTPOST_POINT`
+- 雷达站前哨目标：`if_radar_outpost_target == true` → `ENEMY_OUTPOST_POINT`(2)
+- 能量不足：`if_energy_below_15 == true` → `WE_PROTECT_POINT`(7)
+- 重建前哨：`if_can_rebuild_outpost == true && we_outpost_hp <= 0` → `WE_OUTPOST_POINT`(3)
+- 基地低血回防：`if_base_low_hp == true` → `WE_PROTECT_POINT`(7)
 
-这里当前的策略含义是：
-
-- 因为如果没有雷达站数据，就无法确认敌方前哨站当前血量
-- 所以在比赛开局前 90 秒，会默认优先压到敌方前哨站附近
-- 目的是开局先守住/逼近前哨站相关区域，而不是等到后期再压前哨站
-
-6. 如果当前可以重建前哨站，且己方前哨站血量为 0
-   - 条件：`if_can_rebuild_outpost == true && we_outpost_hp <= 0`
-   - 目标点：`WE_OUTPOST_POINT`
-
-7. 如果己方基地当前不处于低血状态
-   - 条件：`if_base_low_hp == false`
-   - 目标点：`ENEMY_FORTRESS_POINT`
-
-8. 如果比赛剩余时间小于等于两分钟
-   - 条件：`game_remain_time <= 120`
-   - 目标点：`WE_PROTECT_POINT`
-
-这里当前把 `WE_PROTECT_POINT` 作为巡逻/回防点使用。
-
-9. 如果己方基地血量低于 2000
-   - 条件：`if_base_low_hp == true`
-   - 目标点：`WE_PROTECT_POINT`
-
-10. 否则
-   - 当前默认回落到：`INIT_PACK_POINT`
-
-也就是说，当前树的目标点逻辑不是做打分，而是严格优先级决策。
+如需启用：取消对应 XML 注释即可，但需先确认 `BlackboardUpdater` 仍在产出相应黑板键
+（`if_radar_outpost_target`、`if_energy_below_15`、`if_can_rebuild_outpost`、`if_base_low_hp`
+目前仍在产出，只是 XML 没用）。
 
 ## 5.1.2 追击目标覆盖逻辑
 
@@ -340,7 +336,7 @@ sentry_bt_node:
 
 也就是说，现在最终发给导航的目标，不再由 `PublishNavGoal` 自己隐式判断，而是由 `SelectFinalTarget` 单独仲裁。
 
-### 5.1.2.0 追击必须贴着决策点，不追出防守范围
+### 5.1.2.1 追击必须贴着决策点，不追出防守范围
 
 追击候选点虽然还是"绕敌人一圈生成"，但 `AntiAutoAim` 内部会再用一道过滤：
 
@@ -352,7 +348,7 @@ sentry_bt_node:
 - 敌人被引到远离决策点的位置 → 候选点全部落在半径外 → `attack_target_valid = false` → 放弃追击、回落决策点本身
 - 也就是说追击不会"敌人跑到哪就追到哪"，而是围着决策点转
 
-### 5.1.2.0b 丢目标不立即放弃：滞回追击
+### 5.1.2.2 丢目标不立即放弃：滞回追击
 
 视觉丢目标（`if_vision_on == 0`）后**不会立刻切回非追击**：
 
@@ -364,7 +360,7 @@ sentry_bt_node:
 
 当前串口里发送的 `if_on_attack` 也是根据“最终仲裁结果是否真的用了攻击目标”来确定，而不是单纯看是否有追击意图。
 
-### 5.1.2.1 当前“追击是否有输出”依赖链
+### 5.1.2.3 当前“追击是否有输出”依赖链
 
 当前追击输出不是由单一开关决定，而是三层共同决定：
 
@@ -428,7 +424,7 @@ sentry_bt_node:
 
 如果 `attack_target_valid == false`，那么最终仲裁层会回退到手操目标或普通决策目标。
 
-### 5.1.2.2 追击相关 YAML 参数
+### 5.1.2.4 追击相关 YAML 参数
 
 和追击是否能输出直接相关的参数包括：
 

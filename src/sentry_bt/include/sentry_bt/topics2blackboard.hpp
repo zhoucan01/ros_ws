@@ -6,7 +6,6 @@
 #include <behaviortree_cpp/blackboard.h>
 #include <array>
 #include <sentry_decision_msg/msg/enemy_pos.hpp>
-#include <sentry_decision_msg/msg/host_decision.hpp>
 #include <sentry_decision_msg/msg/referee_raw.hpp>
 #include <sentry_decision_msg/msg/manual_pos.hpp>
 #include <sentry_decision_msg/msg/tunnel_monitor.hpp>
@@ -89,7 +88,6 @@ private:
     int calc_defense_attitude_score() const;
     int calc_move_attitude_score() const;
     int select_desired_sentry_attitude() const;
-    sentry_decision_msg::msg::HostDecision BuildHostDecisionMsg(bool if_get_allow_17) const;
 
     BT::Blackboard::Ptr blackboard_;
     rclcpp::Subscription<sentry_decision_msg::msg::RefereeRaw>::SharedPtr referee_raw_sub_;
@@ -100,7 +98,6 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr current_pos_sub_;
     rclcpp::Subscription<algo_master::msg::PLC2Target>::SharedPtr target_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr arrived_sub_;
-    rclcpp::Publisher<sentry_decision_msg::msg::HostDecision>::SharedPtr host_decision_pub_;
     rclcpp::TimerBase::SharedPtr decision_timer_;
     sentry_decision_msg::msg::RefereeRaw referee_raw_msg_;
     geometry_msgs::msg::PoseStamped manual_target_pose_;

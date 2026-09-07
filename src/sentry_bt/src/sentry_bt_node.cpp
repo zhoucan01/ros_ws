@@ -690,6 +690,7 @@ int main(int argc, char **argv)
     blackboard->set("if_energy_below_15", false);
     blackboard->set("if_can_rebuild_outpost", false);
     blackboard->set("if_manual_target_valid", false);
+    blackboard->set("if_force_stay_home", false);
     blackboard->set("if_recently_hurt", false);
     blackboard->set("if_target_far", true);
     blackboard->set("desired_sentry_attitude", 3);
