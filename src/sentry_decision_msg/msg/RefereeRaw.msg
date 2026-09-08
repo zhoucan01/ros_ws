@@ -1,5 +1,16 @@
 int16 projectile_allowance_17mm
 uint16 current_hp
 uint16 my_base_hp
+uint16 we_outpost_hp
+uint16 enemy_outpost_hp
+uint16 game_remain_time
+uint8 game_state
+uint8 if_get_manual_msg
+uint8 if_get_radar_msg
 int16 enemy_hero_x
 int16 enemy_hero_y
+uint8 real_sentry_attitude_switch
+uint8 remaining_energy_flags
+uint16 current_shoot_heat_17mm
+uint16 heat_limit_17mm
+uint16 heat_cool_rate_17mm

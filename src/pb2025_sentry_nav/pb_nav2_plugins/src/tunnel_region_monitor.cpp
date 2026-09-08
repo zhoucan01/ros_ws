@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -38,7 +39,8 @@ enum TunnelStatus
   APPROACHING = 2,
   IN_TUNNEL = 3,
   PASSED = 4,
-  RECOVERY_ACTIVE = 5
+  RECOVERY_ACTIVE = 5,
+  WAITING_FOR_REOPEN = 6
 };
 
 struct RectRegion
@@ -52,6 +54,57 @@ struct RectRegion
   {
     return x >= x_min - margin && x <= x_max + margin && y >= y_min - margin &&
            y <= y_max + margin;
+  }
+};
+
+struct PolygonRegion
+{
+  struct Point
+  {
+    double x{};
+    double y{};
+  };
+
+  std::array<Point, 4> points;
+
+  bool contains(double x, double y, double margin = 0.0) const
+  {
+    bool inside = false;
+    for (size_t current = 0, previous = points.size() - 1; current < points.size(); previous = current++) {
+      const auto & a = points[current];
+      const auto & b = points[previous];
+      const bool crosses = ((a.y > y) != (b.y > y)) &&
+        (x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x);
+      if (crosses) {
+        inside = !inside;
+      }
+    }
+    if (inside || margin <= 0.0) {
+      return inside;
+    }
+
+    const auto squared_distance_to_segment = [x, y](const Point & a, const Point & b) {
+        const double dx = b.x - a.x;
+        const double dy = b.y - a.y;
+        const double squared_length = dx * dx + dy * dy;
+        if (squared_length <= std::numeric_limits<double>::epsilon()) {
+          const double px = x - a.x;
+          const double py = y - a.y;
+          return px * px + py * py;
+        }
+        const double projection = std::clamp(
+          ((x - a.x) * dx + (y - a.y) * dy) / squared_length, 0.0, 1.0);
+        const double px = x - (a.x + projection * dx);
+        const double py = y - (a.y + projection * dy);
+        return px * px + py * py;
+      };
+    const double squared_margin = margin * margin;
+    for (size_t current = 0, previous = points.size() - 1; current < points.size(); previous = current++) {
+      if (squared_distance_to_segment(points[previous], points[current]) <= squared_margin) {
+        return true;
+      }
+    }
+    return false;
   }
 };
 
@@ -75,11 +128,15 @@ public:
     disable_spin_margin_(0.3),
     publish_rate_(2.0),
     transform_tolerance_(0.1),
+    pose_hold_timeout_(0.5),
     approach_stuck_timeout_(2.0),
     tunnel_stuck_timeout_(1.5),
     min_progress_distance_(0.15),
     recovery_retreat_distance_(0.8),
     recovery_clear_margin_(0.05),
+    blocked_tunnel_duration_(30.0),
+    map_origin_offset_x_(0.0),
+    map_origin_offset_y_(0.0),
     min_path_points_in_region_(3),
     target_tunnel_id_(-1),
     tracked_tunnel_id_(-1),
@@ -95,6 +152,7 @@ public:
     progress_reference_x_(0.0),
     progress_reference_y_(0.0),
     tracking_in_tunnel_phase_(false),
+    approach_progress_armed_(false),
     approach_from_exit_side_(false)
   {
     global_frame_ = this->declare_parameter<std::string>("global_frame", "map");
@@ -118,6 +176,8 @@ public:
       "tunnel_recovery_active_topic", "tunnel_recovery_active");
     tunnel_recovery_goal_topic_ =
       this->declare_parameter<std::string>("tunnel_recovery_goal_topic", "tunnel_recovery_goal");
+    tunnel_waiting_for_reopen_topic_ = this->declare_parameter<std::string>(
+      "tunnel_waiting_for_reopen_topic", "tunnel_waiting_for_reopen");
     tunnel_target_yaw_topic_ =
       this->declare_parameter<std::string>("tunnel_target_yaw_topic", "tunnel_target_yaw");
     current_map_yaw_topic_ =
@@ -126,6 +186,8 @@ public:
       this->declare_parameter<std::string>("tunnel_yaw_error_topic", "tunnel_yaw_error");
     tunnel_markers_topic_ =
       this->declare_parameter<std::string>("tunnel_markers_topic", "tunnel_markers");
+    blocked_tunnel_topic_ =
+      this->declare_parameter<std::string>("blocked_tunnel_topic", "blocked_tunnel_id");
     tunnel_monitor_topic_ =
       this->declare_parameter<std::string>("tunnel_monitor_topic", "tunnel_monitor");
     low_clearance_mode_topic_ =
@@ -141,12 +203,18 @@ public:
     min_path_points_in_region_ = this->declare_parameter<int>("min_path_points_in_region", 3);
     publish_rate_ = this->declare_parameter<double>("publish_rate", 2.0);
     transform_tolerance_ = this->declare_parameter<double>("transform_tolerance", 0.1);
+    pose_hold_timeout_ = this->declare_parameter<double>("pose_hold_timeout", 0.5);
     approach_stuck_timeout_ = this->declare_parameter<double>("approach_stuck_timeout", 2.0);
+    approach_alignment_tolerance_ =
+      this->declare_parameter<double>("approach_alignment_tolerance", 0.35);
     tunnel_stuck_timeout_ = this->declare_parameter<double>("tunnel_stuck_timeout", 1.5);
     min_progress_distance_ = this->declare_parameter<double>("min_progress_distance", 0.15);
     recovery_retreat_distance_ =
       this->declare_parameter<double>("recovery_retreat_distance", 0.8);
     recovery_clear_margin_ = this->declare_parameter<double>("recovery_clear_margin", 0.05);
+    blocked_tunnel_duration_ = this->declare_parameter<double>("blocked_tunnel_duration", 30.0);
+    map_origin_offset_x_ = this->declare_parameter<double>("map_origin_offset_x", 0.0);
+    map_origin_offset_y_ = this->declare_parameter<double>("map_origin_offset_y", 0.0);
     low_clearance_tunnel_ids_ = this->declare_parameter<std::vector<int64_t>>(
       "low_clearance_tunnel_ids", std::vector<int64_t>{});
     enable_low_clearance_param_switch_ =
@@ -172,8 +240,18 @@ public:
     entry_ys_ = this->declare_parameter<std::vector<double>>("entry_ys", empty_vec);
     exit_xs_ = this->declare_parameter<std::vector<double>>("exit_xs", empty_vec);
     exit_ys_ = this->declare_parameter<std::vector<double>>("exit_ys", empty_vec);
+    corner_0_xs_ = this->declare_parameter<std::vector<double>>("corner_0_xs", empty_vec);
+    corner_0_ys_ = this->declare_parameter<std::vector<double>>("corner_0_ys", empty_vec);
+    corner_1_xs_ = this->declare_parameter<std::vector<double>>("corner_1_xs", empty_vec);
+    corner_1_ys_ = this->declare_parameter<std::vector<double>>("corner_1_ys", empty_vec);
+    corner_2_xs_ = this->declare_parameter<std::vector<double>>("corner_2_xs", empty_vec);
+    corner_2_ys_ = this->declare_parameter<std::vector<double>>("corner_2_ys", empty_vec);
+    corner_3_xs_ = this->declare_parameter<std::vector<double>>("corner_3_xs", empty_vec);
+    corner_3_ys_ = this->declare_parameter<std::vector<double>>("corner_3_ys", empty_vec);
 
     validateRegions();
+    applyCoordinateOffset();
+    loadTunnelPolygons();
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
@@ -196,12 +274,16 @@ public:
       this->create_publisher<std_msgs::msg::Int32>(target_tunnel_id_topic_, latched_qos);
     tunnel_status_pub_ =
       this->create_publisher<std_msgs::msg::Int32>(tunnel_status_topic_, latched_qos);
+    blocked_tunnel_pub_ =
+      this->create_publisher<std_msgs::msg::Int32>(blocked_tunnel_topic_, latched_qos);
     disable_spin_pub_ =
       this->create_publisher<std_msgs::msg::Bool>(disable_spin_topic_, latched_qos);
     tunnel_recovery_active_pub_ = this->create_publisher<std_msgs::msg::Bool>(
       tunnel_recovery_active_topic_, latched_qos);
     tunnel_recovery_goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
       tunnel_recovery_goal_topic_, latched_qos);
+    tunnel_waiting_for_reopen_pub_ = this->create_publisher<std_msgs::msg::Bool>(
+      tunnel_waiting_for_reopen_topic_, latched_qos);
     tunnel_target_yaw_pub_ =
       this->create_publisher<std_msgs::msg::Float64>(tunnel_target_yaw_topic_, latched_qos);
     current_map_yaw_pub_ =
@@ -297,6 +379,23 @@ private:
       throw std::runtime_error("Tunnel group counts are not aligned");
     }
 
+    const std::array<size_t, 8> polygon_lengths = {
+      corner_0_xs_.size(), corner_0_ys_.size(), corner_1_xs_.size(), corner_1_ys_.size(),
+      corner_2_xs_.size(), corner_2_ys_.size(), corner_3_xs_.size(), corner_3_ys_.size()};
+    const bool polygon_configured = std::any_of(
+      polygon_lengths.begin(), polygon_lengths.end(), [](size_t length) {return length != 0;});
+    if (polygon_configured && std::any_of(
+      polygon_lengths.begin(), polygon_lengths.end(), [this](size_t length) {
+        return length != tunnel_count_;
+      }))
+    {
+      RCLCPP_FATAL(
+        get_logger(), "Tunnel polygon arrays must all contain %zu points, but got (%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu)",
+        tunnel_count_, corner_0_xs_.size(), corner_0_ys_.size(), corner_1_xs_.size(), corner_1_ys_.size(),
+        corner_2_xs_.size(), corner_2_ys_.size(), corner_3_xs_.size(), corner_3_ys_.size());
+      throw std::runtime_error("Tunnel polygon parameter arrays are not aligned");
+    }
+
     auto resize_with_last = [this](std::vector<double> & values, size_t target_size, double fallback) {
       if (values.empty()) {
         values.resize(target_size, fallback);
@@ -331,6 +430,50 @@ private:
     }
   }
 
+  void applyCoordinateOffset()
+  {
+    if (map_origin_offset_x_ == 0.0 && map_origin_offset_y_ == 0.0) {
+      return;
+    }
+
+    auto offset_x = [this](std::vector<double> & values) {
+      for (auto & value : values) {
+        value -= map_origin_offset_x_;
+      }
+    };
+    auto offset_y = [this](std::vector<double> & values) {
+      for (auto & value : values) {
+        value -= map_origin_offset_y_;
+      }
+    };
+
+    offset_x(trigger_x_mins_);
+    offset_x(trigger_x_maxs_);
+    offset_x(tunnel_x_mins_);
+    offset_x(tunnel_x_maxs_);
+    offset_x(entry_xs_);
+    offset_x(exit_xs_);
+    offset_x(corner_0_xs_);
+    offset_x(corner_1_xs_);
+    offset_x(corner_2_xs_);
+    offset_x(corner_3_xs_);
+
+    offset_y(trigger_y_mins_);
+    offset_y(trigger_y_maxs_);
+    offset_y(tunnel_y_mins_);
+    offset_y(tunnel_y_maxs_);
+    offset_y(entry_ys_);
+    offset_y(exit_ys_);
+    offset_y(corner_0_ys_);
+    offset_y(corner_1_ys_);
+    offset_y(corner_2_ys_);
+    offset_y(corner_3_ys_);
+
+    RCLCPP_INFO(
+      get_logger(), "Applied tunnel coordinate offset: x=%.3f, y=%.3f",
+      map_origin_offset_x_, map_origin_offset_y_);
+  }
+
   RectRegion getTriggerRegion(size_t index) const
   {
     return RectRegion{
@@ -341,6 +484,22 @@ private:
   {
     return RectRegion{
       tunnel_x_mins_[index], tunnel_x_maxs_[index], tunnel_y_mins_[index], tunnel_y_maxs_[index]};
+  }
+
+  void loadTunnelPolygons()
+  {
+    tunnel_polygons_.clear();
+    if (corner_0_xs_.empty()) {
+      return;
+    }
+    tunnel_polygons_.reserve(tunnel_count_);
+    for (size_t index = 0; index < tunnel_count_; ++index) {
+      tunnel_polygons_.push_back({{
+        PolygonRegion::Point{corner_0_xs_[index], corner_0_ys_[index]},
+        PolygonRegion::Point{corner_1_xs_[index], corner_1_ys_[index]},
+        PolygonRegion::Point{corner_2_xs_[index], corner_2_ys_[index]},
+        PolygonRegion::Point{corner_3_xs_[index], corner_3_ys_[index]}}});
+    }
   }
 
   static double normalizeAngle(double angle)
@@ -356,11 +515,17 @@ private:
 
   bool pointInTrigger(size_t index, double x, double y, double margin = 0.0) const
   {
+    if (index < tunnel_polygons_.size()) {
+      return tunnel_polygons_[index].contains(x, y, margin);
+    }
     return getTriggerRegion(index).contains(x, y, margin);
   }
 
   bool pointInTunnel(size_t index, double x, double y, double margin = 0.0) const
   {
+    if (index < tunnel_polygons_.size()) {
+      return tunnel_polygons_[index].contains(x, y, margin);
+    }
     return getTunnelRegion(index).contains(x, y, margin);
   }
 
@@ -437,6 +602,7 @@ private:
   void startProgressTracking(bool in_tunnel_phase)
   {
     tracking_in_tunnel_phase_ = in_tunnel_phase;
+    approach_progress_armed_ = in_tunnel_phase;
     progress_reference_x_ = robot_x_;
     progress_reference_y_ = robot_y_;
     last_progress_time_ = this->get_clock()->now();
@@ -469,6 +635,22 @@ private:
       return;
     }
 
+    if (!in_tunnel_phase && !approach_progress_armed_) {
+      if (std::abs(tunnel_yaw_error_) > approach_alignment_tolerance_) {
+        return;
+      }
+      // Do not count chassis alignment time as an entrance blockage. Start the
+      // five-second progress timer only after the base faces the tunnel.
+      approach_progress_armed_ = true;
+      progress_reference_x_ = robot_x_;
+      progress_reference_y_ = robot_y_;
+      last_progress_time_ = this->get_clock()->now();
+      RCLCPP_INFO(
+        get_logger(), "Tunnel %d chassis aligned (yaw error %.2f rad); start entrance progress timer",
+        tracked_tunnel_id_, tunnel_yaw_error_);
+      return;
+    }
+
     const double moved = std::hypot(robot_x_ - progress_reference_x_, robot_y_ - progress_reference_y_);
     if (moved >= min_progress_distance_) {
       progress_reference_x_ = robot_x_;
@@ -486,11 +668,37 @@ private:
     if (tunnel_status_ != APPROACHING && tunnel_status_ != IN_TUNNEL) {
       return false;
     }
+    if (tunnel_status_ == APPROACHING && !approach_progress_armed_) {
+      return false;
+    }
 
     const double timeout = tunnel_status_ == IN_TUNNEL ? tunnel_stuck_timeout_ : approach_stuck_timeout_;
     const auto elapsed = (this->get_clock()->now() - last_progress_time_).seconds();
     return elapsed >= timeout;
   }
+
+  void clearExpiredTunnelBlock()
+  {
+    if (blocked_tunnel_id_ < 0 || std::chrono::steady_clock::now() < blocked_until_) {
+      return;
+    }
+    RCLCPP_INFO(
+      get_logger(), "Tunnel %d block expired after %.1f seconds", blocked_tunnel_id_,
+      blocked_tunnel_duration_);
+    blocked_tunnel_id_ = -1;
+  }
+
+  void blockTunnel(int tunnel_id)
+  {
+    blocked_tunnel_id_ = tunnel_id;
+    blocked_until_ = std::chrono::steady_clock::now() +
+      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::duration<double>(blocked_tunnel_duration_));
+    RCLCPP_WARN(
+      get_logger(), "Tunnel %d has no entrance progress for %.1f seconds; block it for %.1f seconds",
+      tunnel_id, approach_stuck_timeout_, blocked_tunnel_duration_);
+  }
+
 
   geometry_msgs::msg::PoseStamped buildRecoveryGoal(int tunnel_id)
   {
@@ -528,6 +736,7 @@ private:
 
   void refreshState()
   {
+    clearExpiredTunnelBlock();
     if (!enable_tunnel_mode_ || tunnel_count_ == 0) {
       will_pass_tunnel_ = false;
       target_tunnel_id_ = -1;
@@ -537,12 +746,26 @@ private:
       in_tunnel_ = false;
       disable_spin_ = false;
       tunnel_recovery_active_ = false;
+      tunnel_waiting_for_reopen_ = false;
       tunnel_status_ = NORMAL;
       tunnel_target_yaw_ = current_map_yaw_;
       tunnel_yaw_error_ = 0.0;
       approach_from_exit_side_ = false;
       low_clearance_mode_ = false;
       return;
+    }
+
+    if (tunnel_waiting_for_reopen_) {
+      if (blocked_tunnel_id_ >= 0) {
+        tunnel_status_ = WAITING_FOR_REOPEN;
+        low_clearance_mode_ = false;
+        return;
+      }
+      tunnel_waiting_for_reopen_ = false;
+      recovery_tunnel_id_ = -1;
+      approach_tunnel_id_ = -1;
+      approach_from_exit_side_ = false;
+      RCLCPP_INFO(get_logger(), "Tunnel reopened; request a fresh path to the original goal");
     }
 
     target_tunnel_id_ = findTargetTunnelFromPlan();
@@ -583,6 +806,7 @@ private:
 
     if (!will_pass_tunnel_ && !in_tunnel_ && !tunnel_recovery_active_) {
       tunnel_recovery_active_ = false;
+      tunnel_waiting_for_reopen_ = false;
       recovery_tunnel_id_ = -1;
       approach_tunnel_id_ = -1;
       approach_from_exit_side_ = false;
@@ -594,6 +818,14 @@ private:
     if (tunnel_recovery_active_) {
       if (reachedRecoveryGoal()) {
         tunnel_recovery_active_ = false;
+        tunnel_waiting_for_reopen_ = blocked_tunnel_id_ >= 0;
+        if (tunnel_waiting_for_reopen_) {
+          tunnel_status_ = WAITING_FOR_REOPEN;
+          low_clearance_mode_ = false;
+          RCLCPP_INFO(
+            get_logger(), "Reached safe waiting point for blocked tunnel %d", recovery_tunnel_id_);
+          return;
+        }
         recovery_tunnel_id_ = -1;
         approach_tunnel_id_ = -1;
         approach_from_exit_side_ = false;
@@ -633,7 +865,11 @@ private:
        tunnel_status_ == RECOVERY_ACTIVE);
 
     if (shouldTriggerRecovery(active_tunnel_id)) {
+      if (tunnel_status_ == APPROACHING) {
+        blockTunnel(active_tunnel_id);
+      }
       tunnel_recovery_active_ = true;
+      tunnel_waiting_for_reopen_ = false;
       recovery_tunnel_id_ = active_tunnel_id;
       tunnel_recovery_goal_ = buildRecoveryGoal(active_tunnel_id);
       tunnel_status_ = RECOVERY_ACTIVE;
@@ -779,6 +1015,9 @@ private:
     bool_msg.data = tunnel_recovery_active_;
     tunnel_recovery_active_pub_->publish(bool_msg);
 
+    bool_msg.data = tunnel_waiting_for_reopen_;
+    tunnel_waiting_for_reopen_pub_->publish(bool_msg);
+
     bool_msg.data = low_clearance_mode_;
     low_clearance_mode_pub_->publish(bool_msg);
 
@@ -788,6 +1027,9 @@ private:
 
     int_msg.data = tunnel_status_;
     tunnel_status_pub_->publish(int_msg);
+
+    int_msg.data = blocked_tunnel_id_;
+    blocked_tunnel_pub_->publish(int_msg);
 
     std_msgs::msg::Float64 float_msg;
     float_msg.data = tunnel_target_yaw_;
@@ -999,10 +1241,12 @@ private:
   std::string disable_spin_topic_;
   std::string tunnel_recovery_active_topic_;
   std::string tunnel_recovery_goal_topic_;
+  std::string tunnel_waiting_for_reopen_topic_;
   std::string tunnel_target_yaw_topic_;
   std::string current_map_yaw_topic_;
   std::string tunnel_yaw_error_topic_;
   std::string tunnel_markers_topic_;
+  std::string blocked_tunnel_topic_;
   std::string tunnel_monitor_topic_;
   std::string low_clearance_mode_topic_;
 
@@ -1023,11 +1267,16 @@ private:
   double disable_spin_margin_;
   double publish_rate_;
   double transform_tolerance_;
+  double pose_hold_timeout_;
+  double map_origin_offset_x_;
+  double map_origin_offset_y_;
   double approach_stuck_timeout_;
+  double approach_alignment_tolerance_;
   double tunnel_stuck_timeout_;
   double min_progress_distance_;
   double recovery_retreat_distance_;
   double recovery_clear_margin_;
+  double blocked_tunnel_duration_;
 
   int min_path_points_in_region_;
   int target_tunnel_id_;
@@ -1035,6 +1284,7 @@ private:
   int recovery_tunnel_id_;
   int approach_tunnel_id_;
   int tunnel_status_;
+  int blocked_tunnel_id_{-1};
 
   size_t tunnel_count_;
 
@@ -1046,7 +1296,10 @@ private:
   double progress_reference_x_;
   double progress_reference_y_;
   bool tracking_in_tunnel_phase_;
+  bool approach_progress_armed_;
   bool approach_from_exit_side_;
+  bool tunnel_waiting_for_reopen_{false};
+  std::chrono::steady_clock::time_point blocked_until_{};
 
   std::vector<double> trigger_x_mins_;
   std::vector<double> trigger_x_maxs_;
@@ -1060,6 +1313,15 @@ private:
   std::vector<double> entry_ys_;
   std::vector<double> exit_xs_;
   std::vector<double> exit_ys_;
+  std::vector<double> corner_0_xs_;
+  std::vector<double> corner_0_ys_;
+  std::vector<double> corner_1_xs_;
+  std::vector<double> corner_1_ys_;
+  std::vector<double> corner_2_xs_;
+  std::vector<double> corner_2_ys_;
+  std::vector<double> corner_3_xs_;
+  std::vector<double> corner_3_ys_;
+  std::vector<PolygonRegion> tunnel_polygons_;
   std::vector<int64_t> low_clearance_tunnel_ids_;
   std::vector<std::string> low_clearance_target_nodes_;
   std::vector<std::string> low_clearance_target_nodes_resolved_;
@@ -1078,11 +1340,13 @@ private:
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr will_pass_tunnel_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr disable_spin_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr tunnel_recovery_active_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr tunnel_waiting_for_reopen_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr global_pose_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr tunnel_recovery_goal_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr global_point_pub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr target_tunnel_id_pub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr tunnel_status_pub_;
+  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr blocked_tunnel_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr tunnel_target_yaw_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr current_map_yaw_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr tunnel_yaw_error_pub_;

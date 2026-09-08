@@ -1,0 +1,9 @@
+<class_libraries>
+  <library path="pb_jps_minco_planner">
+    <class name="pb_nav2_planners/JpsMincoPlanner"
+           type="pb_nav2_planners::JpsMincoPlanner"
+           base_class_type="nav2_core::GlobalPlanner">
+      <description>Jump Point Search global planner with collision-checked minimum-control smoothing.</description>
+    </class>
+  </library>
+</class_libraries>

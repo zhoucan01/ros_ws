@@ -42,6 +42,7 @@ def generate_launch_description():
     autostart = LaunchConfiguration("autostart")
     use_composition = LaunchConfiguration("use_composition")
     use_respawn = LaunchConfiguration("use_respawn")
+    use_small_gicp = LaunchConfiguration("use_small_gicp")
     rviz_config_file = LaunchConfiguration("rviz_config_file")
     use_rviz = LaunchConfiguration("use_rviz")
 
@@ -126,6 +127,12 @@ def generate_launch_description():
         description="Whether to respawn if a node crashes. Applied when composition is disabled.",
     )
 
+    declare_use_small_gicp_cmd = DeclareLaunchArgument(
+        "use_small_gicp",
+        default_value="True",
+        description="Use GICP relocalization; when false, publish current state-estimate pose from TF.",
+    )
+
     declare_rviz_config_file_cmd = DeclareLaunchArgument(
         "rviz_config_file",
         default_value=os.path.join(bringup_dir, "rviz", "nav2_default_view.rviz"),
@@ -167,6 +174,7 @@ def generate_launch_description():
             "autostart": autostart,
             "use_composition": use_composition,
             "use_respawn": use_respawn,
+            "use_small_gicp": use_small_gicp,
         }.items(),
     )
 
@@ -194,6 +202,7 @@ def generate_launch_description():
     ld.add_action(declare_rviz_config_file_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_use_respawn_cmd)
+    ld.add_action(declare_use_small_gicp_cmd)
 
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_velodyne_convert_tool)

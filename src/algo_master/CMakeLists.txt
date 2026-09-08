@@ -19,6 +19,7 @@ find_package(geometry_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/PLC2Target.msg"
   "msg/PLC2Imu.msg"
+  "msg/WheelRaw.msg"
   DEPENDENCIES
   std_msgs
   geometry_msgs

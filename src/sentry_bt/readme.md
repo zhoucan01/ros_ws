@@ -6,7 +6,23 @@
 
 - 订阅上游决策、裁判、敌方目标、导航与过洞相关话题
 - 把这些输入同步到 BehaviorTree 的黑板
+- 在上位机计算补弹、血量、姿态等派生决策状态
 - 运行行为树 XML，根据黑板状态输出导航目标或姿态切换命令
+
+## 1.1 姿态逻辑现在怎么分层
+
+当前姿态链路已经尽量拆开：
+
+- `RefereeRaw.msg.real_sentry_attitude_switch`
+  - 下位机/裁判系统当前真实姿态
+- `topics2blackboard.cpp`
+  - 负责真实姿态同步、累计时长、3 分钟削弱判断、姿态打分、产出 `desired_sentry_attitude`
+- `sentry_bt.xml`
+  - 不再自己做姿态条件判断，只负责执行 `desired_sentry_attitude`
+- `SentryAttitudeSwitch`
+  - 负责 5 秒切换冷却和实际姿态切换消息发布
+
+也就是说，现在已经把“姿态选择”和“姿态执行”拆开了。
 
 当前可执行节点是：
 
@@ -16,6 +32,46 @@
 
 - [config/sentry_bt.xml](/home/zc/ros_ws/src/sentry_bt/config/sentry_bt.xml)
 - [config/sentry_bt_params.yaml](/home/zc/ros_ws/src/sentry_bt/config/sentry_bt_params.yaml)
+
+## 1.2 点位坐标语义
+
+当前 `sentry_bt` 里的固定点位参数 `points.*`，统一按“右下角全局坐标系下的真实点位”填写。
+
+当前采用的处理方式是：
+
+- `points.*`
+  - YAML 里填写全局真实坐标
+- `ManualPos`
+  - 下位机发来的云台手坐标也按同一套全局坐标系处理
+- `PublishNavGoal`
+  - 在真正发布 `plc2target` 前，统一减去 `INIT_PACK_POINT` 的全局坐标
+  - 把全局坐标转换成建图起点坐标系
+
+也就是说，现在固定点和手操点已经统一到同一套全局坐标语义里，不再出现“有的减、有的不减”的情况。
+
+当前 `INIT_PACK_POINT` 的全局坐标，也就是转换基准，是：
+
+- `points.0`
+
+发布日志里现在会同时打印：
+
+- 全局目标坐标
+- 相对 `INIT_PACK_POINT` 的发布坐标
+
+方便你联调时核对两套坐标系。
+
+## 1.3 目标点可视化
+
+`PublishNavGoal` 每次 tick 都会往 rviz 发布一个 MarkerArray（默认话题 `sentry_bt_target_markers`），其中包含两部分：
+
+- **全部 0..7 决策点总览**：每个决策点一个小球（不同语义固定颜色）+ `P<id>` 文字标签
+  - ns = `sentry_bt_decision_points` / `sentry_bt_decision_points_label`
+  - 颜色含义：白=出生点、绿=己方补给点、红=敌方前哨、黄=己方前哨、品红=敌方基地、青=手操、紫=敌方飞坡、蓝=保护点
+- **当前最终选中的目标**：一个更大的高亮球 + `id=.. src=.. rel=(..)` 标签
+  - ns = `sentry_bt_target` / `sentry_bt_target_label`
+  - 颜色含义：绿=普通决策点、橙=手操目标、红=攻击/追击目标
+
+也就是说，决策树在选哪个点、最终实际发出去的是哪个点，在 rviz 里能一眼看出来。
 
 ## 2. 与过洞逻辑的关系
 
@@ -125,6 +181,411 @@ sentry_bt_node:
 
 - 数据已经进黑板
 - 但行为树是否真的利用这些数据，还要看你后面要不要把 XML 规则补上
+
+## 5.1 当前黑板决策状态
+
+> 说明：`HostDecision.msg` 发布链路（`host_decision_msg`）已删除——
+> 整仓没有任何节点订阅它，属于死代码。所有派生状态现在只写入行为树黑板，
+> 由 `sentry_bt.xml` 直接消费，不再额外发布一份消息。
+
+`BlackboardUpdater` 现在除了同步原始消息外，还会在上位机产出一批派生状态：
+
+- 比赛状态
+  - `if_match_started`
+- 补弹相关
+  - `if_get_allow_17`
+  - `if_allowance_less_50`
+  - `if_allowance_less_100`
+  - `allow_to_get_17mm`
+  - `already_allowance_17`
+  - `available_allowance_17`
+  - `allowance_remain_time`
+- 血量/受击相关
+  - `if_hp_less_50`
+  - `if_hp_less_100`
+  - `if_need_hp_recover`
+  - `if_recently_hurt`
+  - `if_3s_not_hurted`
+  - `if_5s_not_hurted`
+- 目标点/决策相关
+  - `if_enemy_outpost_alive`
+  - `if_radar_outpost_target`
+  - `if_force_enemy_outpost`
+  - `if_can_rebuild_outpost`
+  - `if_base_full_hp`
+  - `if_base_low_hp`
+  - `if_manual_target_valid`
+  - `if_target_far`
+- 姿态相关
+  - `real_sentry_attitude_switch`
+  - `desired_sentry_attitude`
+  - `attack_attitude_time`
+  - `defense_attitude_time`
+  - `move_attitude_time`
+  - `attack_attitude_weakened`
+  - `defense_attitude_weakened`
+  - `move_attitude_weakened`
+- `attack_attitude_score`
+- `defense_attitude_score`
+- `move_attitude_score`
+
+## 5.1.1 当前目标点决策逻辑
+
+当前目标点决策是在行为树 XML 中按优先级从上到下执行的，整体是一个 `if / else if` 风格的 `Fallback` 链。
+
+> ⚠️ 以下描述以 `config/sentry_bt.xml` 当前**实际生效**的代码为准。
+> 早期 readme 里的“雷达前哨 / 重建前哨 / 基地低血回防 / 剩余 120s 回防”等分支
+> 目前在 XML 中是**注释状态、不生效**，见 5.1.1.3。请不要再按旧描述排错。
+
+当前实际生效顺序如下：
+
+1. 比赛没有开始
+   - 条件：`if_match_started == false`
+   - 目标点：`INIT_PACK_POINT`(0)
+
+2. 需要回家（低血 / 补弹 / 回家锁定）
+   - 条件：`if_hp_less_100 == true || if_get_allow_17 == true || if_force_stay_home == true`
+   - 目标点：`WE_DEPOT_POINT`(1)
+
+3. 云台手数据有效
+   - 条件：`if_get_manual_msg == true && if_manual_target_valid == true`
+   - 目标：直接使用手操 `manual_target_result`（不设普通点编号）
+
+4. 开局强制压前哨站
+   - 条件：`if_force_enemy_outpost == true`
+   - 目标点：`ENEMY_OUTPOST_POINT`(2)
+   - 时间窗由 `opening_outpost_force_time_s` 控制，默认 240，即比赛前 240 秒
+     （剩余时间 ≥ 420-240=180 秒），不是旧文档说的“前一分半/90 秒”。
+
+5. 兜底（以上都不满足）
+   - 无条件
+   - 目标点：`WE_PROTECT_POINT`(7)，作为巡逻/回防点使用
+
+也就是说，当前树的目标点逻辑不是做打分，而是严格优先级决策。
+
+### 5.1.1.1 回家锁定（`force_stay_home`）
+
+回家锁定由 `BlackboardUpdater::UpdateStayHomeState()` 维护，规则如下：
+
+- 一旦因为低血或补弹需求进入回家流程，`if_force_stay_home` 会被置为 `true`
+- 只要这个标志还在，第 2 条就会持续命中，目标保持为 `WE_DEPOT_POINT`
+- 如果是因为补弹需求回家（`stay_home_for_ammo_`），则必须
+  “到家 + 血量恢复 + 补弹需求解除”后才允许重新出家
+- 如果只是因为回血回家，则只要“到家 + 回满血”就允许重新出家
+
+### 5.1.1.2 补弹回家时机（动态时间阈值）
+
+补弹逻辑里不再把最后一条写成固定的 `remain_time < 5`，而是使用动态时间阈值：
+
+- 当当前弹量已经非常低时
+- 结合当前位置到回家点的距离
+- 估算以当前速度回家大概需要多久
+- 让机器人尽量在“不早也不晚”的时机回家，刚好赶上下一波补弹窗口
+
+也就是说，这条动态阈值更像“卡补弹点回家”，而不是保守提前回家。
+
+相关参数：
+
+- `allowance.return_speed`
+- `allowance.return_buffer_s`
+
+### 5.1.1.3 已注释 / 未启用的备选分支
+
+以下分支在 `sentry_bt.xml` 里是注释状态，当前不参与决策，保留为备选策略模板：
+
+- 雷达站前哨目标：`if_radar_outpost_target == true` → `ENEMY_OUTPOST_POINT`(2)
+- 能量不足：`if_energy_below_15 == true` → `WE_PROTECT_POINT`(7)
+- 重建前哨：`if_can_rebuild_outpost == true && we_outpost_hp <= 0` → `WE_OUTPOST_POINT`(3)
+- 基地低血回防：`if_base_low_hp == true` → `WE_PROTECT_POINT`(7)
+
+如需启用：取消对应 XML 注释即可，但需先确认 `BlackboardUpdater` 仍在产出相应黑板键
+（`if_radar_outpost_target`、`if_energy_below_15`、`if_can_rebuild_outpost`、`if_base_low_hp`
+目前仍在产出，只是 XML 没用）。
+
+## 5.1.2 追击目标覆盖逻辑
+
+在目标点决策完成后，还会进入“追击覆盖”阶段：
+
+- 如果 `if_need_to_attack == true`
+- 并且 `if_need_hp_recover == false`（血量健康、不需要回血时才追击）
+
+则会调用 `AntiAutoAim`，尝试生成一个攻击目标点 `final_attack_point`。
+
+当前这块已经拆成三层：
+
+1. 正常决策层
+   - 行为树优先级链先给出一个 `normal_target_point`（去哪个战略点，由决策层负责）
+
+2. 追击评估层
+   - `AntiAutoAim` 输入：
+     - `normal_target_point`
+     - `normal_target_pose`（逻辑上依赖正常决策目标）
+     - `enemy_pos_point`
+     - `current_pos`
+     - `costmap`
+   - 输出：
+     - `attack_target_pose`
+     - `attack_target_valid`
+
+3. 最终目标仲裁层
+   - `SelectFinalTarget` 统一决定最终目标来源
+   - 当前优先级是：
+     - 手操目标优先
+     - 其次攻击目标
+     - 最后普通决策点
+
+也就是说，现在最终发给导航的目标，不再由 `PublishNavGoal` 自己隐式判断，而是由 `SelectFinalTarget` 单独仲裁。
+
+### 5.1.2.1 追击必须贴着决策点，不追出防守范围
+
+追击候选点虽然还是"绕敌人一圈生成"，但 `AntiAutoAim` 内部会再用一道过滤：
+
+- 候选攻击点与**当前决策目标点**的距离必须 ≤ `anti_autoaim.decision_chase_radius`（默认 5.0 m）
+
+效果是：
+
+- 决策层决定"去哪个战略点守/打"，追击层只允许在这个点附近接敌
+- 敌人被引到远离决策点的位置 → 候选点全部落在半径外 → `attack_target_valid = false` → 放弃追击、回落决策点本身
+- 也就是说追击不会"敌人跑到哪就追到哪"，而是围着决策点转
+
+### 5.1.2.2 丢目标不立即放弃：滞回追击
+
+视觉丢目标（`if_vision_on == 0`）后**不会立刻切回非追击**：
+
+- 最后一次成功看到可攻击目标后，追击意图保持 `target_lost_timeout_s`（默认 3.0 s）
+- 期间用**最后已知的敌人位置**继续生成追击点，往目标最后出现的位置赶
+- 超时仍未重新看到 → `if_need_to_attack` 置 false → 回落决策点/回家逻辑
+
+这样能避免目标在掩体后短暂消失几秒就立刻"切追击→切非追击"抖动。
+
+当前串口里发送的 `if_on_attack` 也是根据“最终仲裁结果是否真的用了攻击目标”来确定，而不是单纯看是否有追击意图。
+
+### 5.1.2.3 当前“追击是否有输出”依赖链
+
+当前追击输出不是由单一开关决定，而是三层共同决定：
+
+1. 入口是否允许追击
+
+- `if_need_to_attack == true`
+  - 目前来自 `enemy_msg.if_vision_on`
+- `if_need_hp_recover == false`
+  - 目前来自上位机自己的血量判断（需要回血时不追击）
+
+只有入口允许，行为树才会真正调用 `AntiAutoAim`。
+
+2. 当前正常目标点下是否允许追击
+
+`AntiAutoAim` 会根据当前 `normal_target_point` 查 YAML 里的策略配置：
+
+- `anti_autoaim.policy.<point_id>.enable`
+- `anti_autoaim.policy.<point_id>.limit`
+
+其中：
+
+- `enable = false`
+  - 该普通目标点下直接禁止追击
+- `limit = true`
+  - 追击候选点还必须落在该目标点对应的限制矩形内
+
+对应矩形参数为：
+
+- `anti_autoaim.rect.<point_id>.x_min`
+- `anti_autoaim.rect.<point_id>.x_max`
+- `anti_autoaim.rect.<point_id>.y_min`
+- `anti_autoaim.rect.<point_id>.y_max`
+
+3. 环境里是否真的能算出可行攻击点
+
+即使入口允许、策略也允许，`AntiAutoAim` 还要继续检查：
+
+- `enemy_pos_point`
+- `current_pos`
+- `costmap`
+
+处理流程大致是：
+
+- 先围绕敌人生成一圈候选点
+- 用 `costmap` 过滤掉代价过高的点
+- 如果开了 `limit`，再过滤掉矩形外的点
+- 再过滤掉距当前决策点超过 `decision_chase_radius` 的点（默认 5.0 m，追不出防守范围）
+- 如果最后没有剩余候选点，则追击失败（回落决策点）
+
+所以当前追击是否有输出，可以概括为：
+
+`if_need_to_attack && !if_need_hp_recover && policy.enable && 决策点半径内 && 环境可行`
+
+其中 `if_need_to_attack` 带丢目标滞回：最后一次看到可攻击目标在 `target_lost_timeout_s`（默认 3.0 s）内
+即使当前帧没看到也保持 true（用最后已知敌人位置追击），超时才变 false。
+
+最终输出结果是：
+
+- `attack_target_valid`
+- `attack_target_pose`
+
+如果 `attack_target_valid == false`，那么最终仲裁层会回退到手操目标或普通决策目标。
+
+### 5.1.2.4 追击相关 YAML 参数
+
+和追击是否能输出直接相关的参数包括：
+
+- `anti_autoaim.enable_attack`
+- `anti_autoaim.limit_chase_range`
+- `anti_autoaim.max_chase_distance`
+- `anti_autoaim.decision_chase_radius`（追击候选点距当前决策点的最大半径，默认 5.0）
+- `anti_autoaim.cost_threshold`
+- `anti_autoaim.distance_weight`
+- `anti_autoaim.cost_weight`
+- `target_lost_timeout_s`（丢目标滞回秒数，默认 3.0）
+
+以及每个普通目标点单独的策略参数：
+
+- `anti_autoaim.policy.<point_id>.enable`
+- `anti_autoaim.policy.<point_id>.limit`
+
+以及每个普通目标点的追击限制区域：
+
+- `anti_autoaim.rect.<point_id>.x_min/x_max/y_min/y_max`
+
+## 5.2 姿态选择逻辑
+
+当前姿态系统已经拆成了“选择”和“执行”两层：
+
+- 选择层：`topics2blackboard.cpp`
+  - 基于真实姿态、比赛剩余时间、当前位置、追击状态、受击状态等信息做姿态打分
+  - 输出 `desired_sentry_attitude`
+- 执行层：`sentry_bt.xml` + `SentryAttitudeSwitch`
+  - 行为树只执行 `desired_sentry_attitude`
+  - `SentryAttitudeSwitch` 负责姿态切换消息发布和 5 秒冷却
+
+### 5.2.1 真实姿态和目标姿态的区别
+
+- `real_sentry_attitude_switch`
+  - 来源：`RefereeRaw.msg`
+  - 含义：下位机/裁判系统当前真实生效的姿态
+- `desired_sentry_attitude`
+  - 来源：上位机姿态评分器
+  - 含义：上位机当前希望切换到的姿态
+
+姿态累计时间、3 分钟削弱判断，都是基于 `real_sentry_attitude_switch` 统计，而不是基于 `desired_sentry_attitude` 猜测。
+
+### 5.2.2 姿态累计时间与削弱
+
+`BlackboardUpdater` 会按 `game_remain_time` 的变化，给真实姿态累计使用时间：
+
+- `attack_attitude_time`
+- `defense_attitude_time`
+- `move_attitude_time`
+
+当某个姿态累计时间超过阈值 `attitude.weaken_threshold_s`（默认 180 秒）时，对应姿态会进入削弱状态：
+
+- `attack_attitude_weakened`
+- `defense_attitude_weakened`
+- `move_attitude_weakened`
+
+削弱不会直接禁止使用该姿态，而是通过打分惩罚降低它被选中的概率。
+
+### 5.2.3 当前三类姿态的打分方式
+
+#### 攻击姿态 `attack`
+
+主要倾向于：
+
+- 正在追击
+- 已到点
+- 目标不远
+- 最近没有被打
+
+当前默认加分/扣分来源：
+
+- `attitude.attack.need_attack`
+- `attitude.attack.arrived`
+- `attitude.attack.recently_hurt_penalty`
+- `attitude.attack.target_far_penalty`
+- `attitude.attack.target_near_bonus`
+- `attitude.attack.weakened_penalty`
+
+#### 防御姿态 `defense`
+
+主要倾向于：
+
+- 最近被打
+- 血量较低
+- 离目标不算远
+
+当前默认加分/扣分来源：
+
+- `attitude.defense.recently_hurt`
+- `attitude.defense.low_hp`
+- `attitude.defense.target_far_penalty`
+- `attitude.defense.target_near_bonus`
+- `attitude.defense.weakened_penalty`
+
+#### 移动姿态 `move`
+
+主要倾向于：
+
+- 目标较远
+- 还没到点
+- 当前目标是回家点 `WE_DEPOT_POINT`
+- 最近没有持续受击
+
+当前默认加分/扣分来源：
+
+- `attitude.move.target_far`
+- `attitude.move.arrived_penalty`
+- `attitude.move.not_arrived_bonus`
+- `attitude.move.recently_hurt_penalty`
+- `attitude.move.go_home_bonus`
+- `attitude.move.weakened_penalty`
+
+当前代码里，如果行为树当前目标点是 `WE_DEPOT_POINT`，会额外给移动姿态加一笔较高分数，
+目的是在“回家补血/补弹”的任务下，尽量优先维持移动姿态，不轻易切到攻击或防御姿态。
+
+### 5.2.4 最终怎么选姿态
+
+当前会分别计算：
+
+- `attack_attitude_score`
+- `defense_attitude_score`
+- `move_attitude_score`
+
+然后直接选分数最高的姿态，写入：
+
+- `desired_sentry_attitude`
+
+行为树 XML 不再自己做姿态判断，而是只负责把这个结果交给 `SentryAttitudeSwitch` 去执行。
+
+### 5.2.5 可调参数
+
+这些参数都在：
+
+- [sentry_bt_params.yaml](/home/zc/ros_ws/src/sentry_bt/config/sentry_bt_params.yaml)
+
+和姿态选择直接相关的参数有：
+
+- `target_far_threshold`
+- `attitude.weaken_threshold_s`
+
+- `attitude.attack.need_attack`
+- `attitude.attack.arrived`
+- `attitude.attack.recently_hurt_penalty`
+- `attitude.attack.target_far_penalty`
+- `attitude.attack.target_near_bonus`
+- `attitude.attack.weakened_penalty`
+
+- `attitude.defense.recently_hurt`
+- `attitude.defense.low_hp`
+- `attitude.defense.target_far_penalty`
+- `attitude.defense.target_near_bonus`
+- `attitude.defense.weakened_penalty`
+
+- `attitude.move.target_far`
+- `attitude.move.arrived_penalty`
+- `attitude.move.not_arrived_bonus`
+- `attitude.move.recently_hurt_penalty`
+- `attitude.move.weakened_penalty`
+
+如果联调时发现姿态切换太激进或太保守，优先调整这一组参数，而不是先改 C++ 逻辑。
 
 ## 6. 建议的下一步
 

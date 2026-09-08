@@ -31,6 +31,10 @@ def generate_launch_description():
                 name="algo_master",
                 namespace=namespace,
                 parameters=[params_file],
+                remappings=[
+                    ("/tf", "tf"),
+                    ("/tf_static", "tf_static"),
+                ],
                 output="screen",
             ),
         ]

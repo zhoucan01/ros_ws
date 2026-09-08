@@ -21,9 +21,14 @@ ament_auto_add_library(pb_back_up_frees_space_behavior SHARED
 
 ament_auto_add_library(pb_nav2_layers SHARED
   src/layers/intensity_voxel_layer.cpp
+  src/layers/tunnel_cost_layer.cpp
 )
 
 target_link_libraries(pb_nav2_layers yaml-cpp)
+
+ament_auto_add_library(pb_jps_minco_planner SHARED
+  src/jps_minco_planner.cpp
+)
 
 ament_auto_add_library(pb_topic_bool_condition_bt_node SHARED
   src/bt_nodes/topic_bool_condition.cpp
@@ -33,8 +38,16 @@ ament_auto_add_library(pb_select_pose_by_topic_bt_node SHARED
   src/bt_nodes/select_pose_by_topic.cpp
 )
 
+ament_auto_add_library(pb_wait_for_tunnel_reopen_bt_node SHARED
+  src/bt_nodes/wait_for_tunnel_reopen.cpp
+)
+
 ament_auto_add_executable(tunnel_region_monitor
   src/tunnel_region_monitor.cpp
+)
+
+ament_auto_add_executable(tf_pose_publisher
+  src/tf_pose_publisher.cpp
 )
 
 if(BUILD_TESTING)
@@ -48,6 +61,9 @@ find_package(ament_lint_auto REQUIRED)
 endif()
 
 pluginlib_export_plugin_description_file(nav2_core behavior_plugin.xml)
+pluginlib_export_plugin_description_file(nav2_core global_planner_plugin.xml)
 pluginlib_export_plugin_description_file(nav2_costmap_2d costmap_plugins.xml)
+ament_auto_add_executable(tunnel_strategy_node src/tunnel_strategy_node.cpp)
+target_link_libraries(tunnel_strategy_node ${dependencies})
 
 ament_auto_package()

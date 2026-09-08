@@ -3,3 +3,15 @@ devel/
 install/
 logs/
 .catkin_tools/
+
+# ROS 2 (colcon)
+install_isolated/
+colcon_*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 本地整理产物（_portfolio_pack 仅本地使用，不提交）
+_portfolio_pack/

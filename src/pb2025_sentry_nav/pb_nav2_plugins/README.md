@@ -82,10 +82,10 @@ Common to [costmap-plugins/voxel.html](https://docs.nav2.org/configuration/packa
 另外还支持一张“白名单通行 mask 图”，用于忽略已知可通行区域中的误检障碍，例如高地下坡入口附近的限高杆。相关参数如下：
 
 - `free_pass_mask.enabled`
-- `free_pass_mask.yaml_filename`
+- `free_pass_mask.mask_yaml_filename`
 - `free_pass_mask.frame_id`
 
-其中 `yaml_filename` 指向一份与地图对齐的 mask yaml 文件，格式与普通 map yaml 类似，内部再引用一张 pgm 图片。mask 图中被标成“占用”的区域，将被解释为“白名单通行区域”，落在这些区域内的点即使满足 `IntensityVoxelLayer` 的高度和 intensity 条件，也不会被推进 costmap。
+其中 `mask_yaml_filename` 指向一份与地图对齐的 mask yaml 文件，格式与普通 map yaml 类似，内部再引用一张 pgm 图片。mask 图中被标成“占用”的区域，将被解释为“白名单通行区域”，落在这些区域内的点即使满足 `IntensityVoxelLayer` 的高度和 intensity 条件，也不会被推进 costmap。
 
 **坐标系说明：**
 
@@ -126,7 +126,7 @@ local_costmap:
         max_obstacle_intensity: 2.0
         free_pass_mask:
           enabled: true
-          yaml_filename: $(find-pkg-share pb2025_nav_bringup)/map/reality/rmuc_2025_free_pass_mask.yaml
+          mask_yaml_filename: $(find-pkg-share pb2025_nav_bringup)/map/reality/rmuc_2025_free_pass_mask.yaml
           frame_id: map
         observation_sources: terrain_map
         terrain_map:
@@ -154,7 +154,7 @@ local_costmap:
 2. 用画图工具把“允许直接通过的区域”涂成白色，其余区域保持黑色。
 3. 保存为新的 mask 图，例如 `rmuc_2025_free_pass_mask.pgm`。
 4. 再写一个对应的 yaml，例如 `rmuc_2025_free_pass_mask.yaml`，其中 `image / resolution / origin` 与主地图保持一致。
-5. 在 `IntensityVoxelLayer.free_pass_mask.yaml_filename` 中填入这份 yaml 的路径。
+5. 在 `IntensityVoxelLayer.free_pass_mask.mask_yaml_filename` 中填入这份 yaml 的路径。
 
 **如何标记成白名单：**
 

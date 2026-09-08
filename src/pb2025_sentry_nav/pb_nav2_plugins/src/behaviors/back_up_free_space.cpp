@@ -38,6 +38,17 @@ void BackUpFreeSpace::onConfigure()
 
   costmap_client_ = node->create_client<nav2_msgs::srv::GetCostmap>(service_name_);
 
+  status_timer_ = node->create_wall_timer(
+    std::chrono::seconds(2),
+    [this]() {
+      RCLCPP_WARN_THROTTLE(
+        logger_, *clock_, 2000,
+        "BackUpFreeSpace status: trigger_count=%zu cycle_count=%zu active=%s",
+        trigger_count_, cycle_count_, active_ ? "true" : "false");
+    });
+
+  RCLCPP_WARN(logger_, "BackUpFreeSpace configured: trigger_count=%zu cycle_count=%zu", trigger_count_, cycle_count_);
+
   if (visualize_) {
     marker_pub_ = node->template create_publisher<visualization_msgs::msg::MarkerArray>(
       "back_up_free_space_markers", 1);
@@ -49,11 +60,21 @@ void BackUpFreeSpace::onCleanup()
 {
   costmap_client_.reset();
   marker_pub_.reset();
+  status_timer_.reset();
 }
 
 nav2_behaviors::Status BackUpFreeSpace::onRun(
   const std::shared_ptr<const BackUpAction::Goal> command)
 {
+  ++trigger_count_;
+  cycle_count_ = 0;
+  active_ = true;
+  RCLCPP_WARN(
+    logger_,
+    "BackUpFreeSpace triggered #%zu: target_x=%.3f speed=%.3f time_allowance=%.3f",
+    trigger_count_, command->target.x, command->speed,
+    command->time_allowance.sec + command->time_allowance.nanosec * 1e-9);
+
   while (!costmap_client_->wait_for_service(std::chrono::seconds(1))) {
     if (!rclcpp::ok()) {
       RCLCPP_ERROR(logger_, "Interrupted while waiting for the service. Exiting.");
@@ -108,8 +129,19 @@ nav2_behaviors::Status BackUpFreeSpace::onRun(
 
 nav2_behaviors::Status BackUpFreeSpace::onCycleUpdate()
 {
+  ++cycle_count_;
+  static bool logged_running = false;
+  if (!logged_running) {
+    RCLCPP_WARN(
+      logger_, "BackUpFreeSpace entered RUNNING state: trigger_count=%zu cycle_count=%zu",
+      trigger_count_, cycle_count_);
+    logged_running = true;
+  }
+
   rclcpp::Duration time_remaining = end_time_ - clock_->now();
   if (time_remaining.seconds() < 0.0 && command_time_allowance_.seconds() > 0.0) {
+    logged_running = false;
+    active_ = false;
     stopRobot();
     RCLCPP_WARN(
       logger_,
@@ -121,6 +153,8 @@ nav2_behaviors::Status BackUpFreeSpace::onCycleUpdate()
   geometry_msgs::msg::PoseStamped current_pose;
   if (!nav2_util::getCurrentPose(
         current_pose, *tf_, global_frame_, robot_base_frame_, transform_tolerance_)) {
+    logged_running = false;
+    active_ = false;
     RCLCPP_ERROR(logger_, "Current robot pose is not available.");
     return nav2_behaviors::Status::FAILED;
   }
@@ -133,7 +167,10 @@ nav2_behaviors::Status BackUpFreeSpace::onCycleUpdate()
   action_server_->publish_feedback(feedback_);
 
   if (distance >= std::fabs(command_x_)) {
+    logged_running = false;
+    active_ = false;
     stopRobot();
+    RCLCPP_WARN(logger_, "BackUpFreeSpace completed successfully: distance=%.3f target=%.3f", distance, std::fabs(command_x_));
     return nav2_behaviors::Status::SUCCEEDED;
   }
 
@@ -147,6 +184,8 @@ nav2_behaviors::Status BackUpFreeSpace::onCycleUpdate()
   pose.theta = tf2::getYaw(current_pose.pose.orientation);
 
   if (!isCollisionFree(distance, cmd_vel.get(), pose)) {
+    logged_running = false;
+    active_ = false;
     stopRobot();
     RCLCPP_WARN(logger_, "Collision Ahead - Exiting DriveOnHeading");
     return nav2_behaviors::Status::FAILED;
@@ -183,7 +222,7 @@ float BackUpFreeSpace::findBestDirection(
   for (float angle = start_angle; angle <= end_angle; angle += angle_increment) {
     bool is_safe = true;
 
-    for (float r = 0.5; r <= radius; r += resolution) {
+    for (float r = 0.2; r <= radius; r += resolution) {
       float x = pose.x + r * std::cos(angle);
       float y = pose.y + r * std::sin(angle);
 

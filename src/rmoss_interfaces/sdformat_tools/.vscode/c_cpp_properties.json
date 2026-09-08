@@ -1,0 +1,38 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/opt/ros/humble/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/algo_master/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/pb2025_sentry_nav/fake_vel_transform/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/pb2025_sentry_nav/ign_sim_pointcloud_tool/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/pb2025_sentry_nav/loam_interface/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/pb2025_sentry_nav/pb_nav2_plugins/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/pb2025_sentry_nav/pb_omni_pid_pursuit_controller/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/pb2025_sentry_nav/pb_teleop_twist_joy/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/pb2025_sentry_nav/point_lio/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/pb2025_sentry_nav/pointcloud_to_laserscan/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/pb2025_sentry_nav/sensor_scan_generation/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/pb2025_sentry_nav/small_gicp_relocalization/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/rmoss_core/rmoss_base/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/rmoss_core/rmoss_cam/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/rmoss_core/rmoss_projectile_motion/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/rmoss_core/rmoss_util/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/rmoss_gazebo/rmoss_gz_base/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/rmoss_gazebo/rmoss_gz_bridge/include/**",
+        "/home/zc/ros_ws_zc/ros_ws/src/rmoss_gazebo/rmoss_gz_cam/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}

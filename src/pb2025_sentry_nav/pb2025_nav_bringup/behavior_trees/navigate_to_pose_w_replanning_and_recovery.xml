@@ -9,12 +9,13 @@
                            output_pose="{selected_goal}"
                            active_topic="tunnel_recovery_active"
                            pose_topic="tunnel_recovery_goal"/>
+        <WaitForTunnelReopen topic_name="tunnel_waiting_for_reopen"/>
         <RateController hz="3.0">
           <RecoveryNode name="ComputePathToPose"
                         number_of_retries="1">
             <ComputePathToPose goal="{selected_goal}"
                                path="{path}"
-                               planner_id="GridBased"/>
+                               planner_id="JpsMinco"/>
             <ClearEntireCostmap name="ClearGlobalCostmap-Context"
                                 service_name="global_costmap/clear_entirely_global_costmap"/>
           </RecoveryNode>

@@ -42,9 +42,11 @@ def generate_launch_description():
     autostart = LaunchConfiguration("autostart")
     use_composition = LaunchConfiguration("use_composition")
     use_respawn = LaunchConfiguration("use_respawn")
+    use_small_gicp = LaunchConfiguration("use_small_gicp")
     rviz_config_file = LaunchConfiguration("rviz_config_file")
     use_robot_state_pub = LaunchConfiguration("use_robot_state_pub")
     use_rviz = LaunchConfiguration("use_rviz")
+    lio_type = LaunchConfiguration("lio_type")
 
     # Declare the launch arguments
     declare_namespace_cmd = DeclareLaunchArgument(
@@ -117,6 +119,18 @@ def generate_launch_description():
         description="Whether to respawn if a node crashes. Applied when composition is disabled.",
     )
 
+    declare_lio_type_cmd = DeclareLaunchArgument(
+        "lio_type",
+        default_value="point",
+        description="LIO implementation: point or small",
+    )
+
+    declare_use_small_gicp_cmd = DeclareLaunchArgument(
+        "use_small_gicp",
+        default_value="True",
+        description="Use GICP relocalization; when false, publish current state-estimate pose from TF.",
+    )
+
     declare_use_robot_state_pub_cmd = DeclareLaunchArgument(
         "use_robot_state_pub",
         default_value="False",
@@ -186,6 +200,8 @@ def generate_launch_description():
             "autostart": autostart,
             "use_composition": use_composition,
             "use_respawn": use_respawn,
+            "use_small_gicp": use_small_gicp,
+            "lio_type": lio_type,
         }.items(),
     )
 
@@ -214,6 +230,8 @@ def generate_launch_description():
     ld.add_action(declare_use_robot_state_pub_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_use_respawn_cmd)
+    ld.add_action(declare_lio_type_cmd)
+    ld.add_action(declare_use_small_gicp_cmd)
 
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_robot_state_publisher_cmd)

@@ -37,6 +37,10 @@ AntiAutoAim::AntiAutoAim(const std::string &name, const BT::NodeConfig &config,
     policy_map_[name] = policy;
   }
 
+  params_.decision_chase_radius = node_->declare_parameter<double>(
+      "anti_autoaim.decision_chase_radius", params_.decision_chase_radius);
+  loadDecisionPointCoordinates();
+
   // tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
   // tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
   // cmd_vel_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 1);
@@ -44,14 +48,54 @@ AntiAutoAim::AntiAutoAim(const std::string &name, const BT::NodeConfig &config,
         "/attack_pose_viz", 10);
 }
 
-BT::PortsList AntiAutoAim::providedPorts()
+void AntiAutoAim::loadDecisionPointCoordinates()
 {
+  decision_points_.clear();
 
-  return {
+  // 与 sentry_bt_node::LoadPointCoords / PublishNavGoal 保持同一套坐标语义：
+  // 参数 points.<id> 为全局坐标 -> field mirror(可选) -> 减去 map_origin -> map 系。
+  const bool mirror_enabled = node_->declare_parameter<bool>("field_mirror_enable", false);
+  const double field_length = node_->declare_parameter<double>("field_length", 28.0);
+  const double field_width = node_->declare_parameter<double>("field_width", 15.0);
+  const double map_origin_x = node_->declare_parameter<double>("map_origin_x", 3.76);
+  const double map_origin_y = node_->declare_parameter<double>("map_origin_y", 8.0);
+
+  const int count = node_->declare_parameter<int>("decision_point_count", 8);
+  for (int point_id = 0; point_id < count; ++point_id)
+  {
+    const std::string param_name = "points." + std::to_string(point_id);
+    std::vector<double> value;
+    if (!node_->get_parameter(param_name, value) || value.size() < 2)
+    {
+      continue;
+    }
+    double x = value[0];
+    double y = value[1];
+    if (mirror_enabled)
+    {
+      x = field_length - x;
+      y = field_width - y;
+    }
+    Point p;
+    p.x = x - map_origin_x;
+    p.y = y - map_origin_y;
+    p.z = 0.0;
+    decision_points_[point_id] = p;
+  }
+
+  if (decision_points_.empty())
+  {
+    RCLCPP_WARN(node_->get_logger(), "no decision point coordinates loaded; decision_chase_radius filter disabled");
+  }
+}
+
+BT::PortsList AntiAutoAim::providedPorts()
+{  return {
       BT::InputPort<int>("target_point_port", "target_point port"),
       BT::InputPort<nav_msgs::msg::OccupancyGrid>("costmap_port", "Global costmap"),
       BT::InputPort<geometry_msgs::msg::PointStamped>("currentpos_port", "currentpos port"),
       BT::OutputPort<geometry_msgs::msg::PoseStamped>("attack_point_port", "Output target attack point"),
+      BT::OutputPort<bool>("attack_target_valid", "Whether attack target is valid"),
       BT::InputPort<geometry_msgs::msg::PointStamped>("enemy_pos_point_port", "currentpos port"),};
 
 }
@@ -76,6 +120,7 @@ BT::NodeStatus AntiAutoAim::tick()
   {
     if (!policy.enable)
     {
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
     }
   }
@@ -83,6 +128,7 @@ BT::NodeStatus AntiAutoAim::tick()
   {
     if (!params_.enable_attack)
     {
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
     }
   }
@@ -96,16 +142,19 @@ BT::NodeStatus AntiAutoAim::tick()
   if (!global_costmap)
   {
     RCLCPP_ERROR(node_->get_logger(), "Missing required input: costmap_port");
+    setOutput("attack_target_valid", false);
     return BT::NodeStatus::FAILURE; // 修正返回类型
   }
   if (!current_pos)
   {
     RCLCPP_ERROR(node_->get_logger(), "Missing required input: currentpos_port");
+    setOutput("attack_target_valid", false);
     return BT::NodeStatus::FAILURE;
   }
   if (!enemy_pos_point_)
   {
     RCLCPP_ERROR(node_->get_logger(), "Missing required input: enemy_pos_point_port");
+    setOutput("attack_target_valid", false);
     return BT::NodeStatus::FAILURE;
   }
 
@@ -124,6 +173,7 @@ BT::NodeStatus AntiAutoAim::tick()
   if (feasible_points.empty())
   {
       RCLCPP_WARN(node_->get_logger(), "No feasible points available, cannot determine attack point");
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
   }
 
@@ -135,12 +185,14 @@ BT::NodeStatus AntiAutoAim::tick()
     if (!target_point_input)
     {
       RCLCPP_WARN(node_->get_logger(), "limit_chase_range enabled but target_point_port missing");
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
     }
 
     if (!getDecisionPointRect(target_point_input.value(), limit_rect))
     {
       RCLCPP_WARN(node_->get_logger(), "limit_chase_range enabled but decision rectangle not found");
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
     }
     has_limit_rect = true;
@@ -158,11 +210,48 @@ BT::NodeStatus AntiAutoAim::tick()
     if (limited.empty())
     {
       RCLCPP_WARN(node_->get_logger(), "No feasible points inside chase rectangle");
+      setOutput("attack_target_valid", false);
       return BT::NodeStatus::FAILURE;
     }
     feasible_points.swap(limited);
   }
-  
+
+  // 追击点必须在"当前决策点周围 decision_chase_radius 半径"内：
+  // 决策层负责选目标点(去哪个战略点)，追击层只允许在这个点附近接敌，
+  // 敌人被引到远离决策点的位置时自然放弃追击、回落决策点。
+  if (params_.decision_chase_radius > 0.0 && target_point_input)
+  {
+    const auto decision_it = decision_points_.find(target_point_input.value());
+    if (decision_it != decision_points_.end())
+    {
+      const Point &dp = decision_it->second;
+      std::vector<Point> near_decision;
+      for (const auto &p : feasible_points)
+      {
+        if (std::hypot(p.x - dp.x, p.y - dp.y) <= params_.decision_chase_radius)
+        {
+          near_decision.push_back(p);
+        }
+      }
+      if (near_decision.empty())
+      {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "No feasible points within %.2f m of decision point %d; give up chase and fall back to decision point",
+            params_.decision_chase_radius, target_point_input.value());
+        setOutput("attack_target_valid", false);
+        return BT::NodeStatus::FAILURE;
+      }
+      feasible_points.swap(near_decision);
+    }
+    else
+    {
+      RCLCPP_WARN_THROTTLE(
+          node_->get_logger(), *node_->get_clock(), 2000,
+          "decision point %d coordinate not loaded; skip decision_chase_radius filter",
+          target_point_input.value());
+    }
+  }
 
   const auto best_point = selectBestPoint(
       feasible_points, current_pos.value().point, global_costmap.value());
@@ -176,6 +265,7 @@ BT::NodeStatus AntiAutoAim::tick()
   // RCLCPP_INFO(node_->get_logger(), "attack_pose: x=%.2f, y=%.2f", attack_pose.pose.position.x, attack_pose.pose.position.y);
 
   setOutput("attack_point_port", attack_pose);
+  setOutput("attack_target_valid", true);
 
   if (params_.visualize)
   {
@@ -214,7 +304,7 @@ std::vector<geometry_msgs::msg::Point> AntiAutoAim::generateCandidatePoints(cons
   std::vector<geometry_msgs::msg::Point> candidates;
   candidates.reserve(params_.num_sectors);
 
-  RCLCPP_INFO(node_->get_logger(),"best_point: x=%.2f, y=%.2f", enemy_point.x, enemy_point.y);
+  RCLCPP_INFO(node_->get_logger(),"enemy_point: x=%.2f, y=%.2f", enemy_point.x, enemy_point.y);
 
   for (int i = 0; i < params_.num_sectors; ++i)
   {
